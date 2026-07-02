@@ -21,11 +21,7 @@
 	color: #eee;
 	font-size: 13px;
 	font-family:
-		-apple-system,
-		BlinkMacSystemFont,
-		"SF Pro Text",
-		system-ui,
-		sans-serif;
+		-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
 	text-align: left;
 	cursor: pointer;
 }

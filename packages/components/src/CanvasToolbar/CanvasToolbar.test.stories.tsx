@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent } from "vitest/browser";
-import { expect, fn, within } from "storybook/test";
 import { useState } from "react";
-import { CanvasToolbar, type CanvasTool } from "./CanvasToolbar.tsx";
+import { expect, fn, within } from "storybook/test";
+import { userEvent } from "vitest/browser";
+import { type CanvasTool, CanvasToolbar } from "./CanvasToolbar.tsx";
 
 interface HostProps {
 	initial: CanvasTool;

@@ -1,8 +1,8 @@
 import * as Automerge from "@automerge/automerge";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useRef, useState } from "react";
-import { userEvent } from "vitest/browser";
 import { expect, waitFor, within } from "storybook/test";
+import { userEvent } from "vitest/browser";
 import { MarkdownArea } from "./MarkdownArea.tsx";
 
 // Index signature satisfies Automerge's `Record<string, unknown>`
@@ -92,13 +92,9 @@ export const DiagnoseAutomergeRaw: Story = {
 	args: { initial: "" },
 	play: async () => {
 		let doc = Automerge.from<DocShape>({ body: "" });
-		doc = Automerge.change(doc, (d) =>
-			Automerge.updateText(d, ["body"], "a"),
-		);
+		doc = Automerge.change(doc, (d) => Automerge.updateText(d, ["body"], "a"));
 		const after_a = doc.body;
-		doc = Automerge.change(doc, (d) =>
-			Automerge.updateText(d, ["body"], "ab"),
-		);
+		doc = Automerge.change(doc, (d) => Automerge.updateText(d, ["body"], "ab"));
 		const after_ab = doc.body;
 		doc = Automerge.change(doc, (d) =>
 			Automerge.updateText(d, ["body"], "abc"),
@@ -198,10 +194,7 @@ function SingleAutomergeHost({ initial }: { initial: string }) {
 	};
 	return (
 		<div data-testid="host-a" style={{ width: 480 }}>
-			<MarkdownArea
-				value={docRef.current.body ?? ""}
-				onChange={onChange}
-			/>
+			<MarkdownArea value={docRef.current.body ?? ""} onChange={onChange} />
 			<pre data-testid="value-a">{docRef.current.body ?? ""}</pre>
 		</div>
 	);
@@ -263,9 +256,7 @@ export const TypingAfterRemoteEditPreservesBothPeers: Story = {
 		const editorA = findEditor(canvasElement, "a");
 		await userEvent.click(editorA);
 		await userEvent.keyboard("hello");
-		await waitFor(() =>
-			expect(getValue(canvasElement, "b")).toBe("hello"),
-		);
+		await waitFor(() => expect(getValue(canvasElement, "b")).toBe("hello"));
 
 		// B types one char. With the bug, B's stale `ec.text=""`
 		// makes Chromium emit a textupdate whose resulting text is
@@ -293,9 +284,7 @@ export const InterleavedEditsRetainBothPeersText: Story = {
 		const editorA = findEditor(canvasElement, "a");
 		await userEvent.click(editorA);
 		await userEvent.keyboard("A1");
-		await waitFor(() =>
-			expect(getValue(canvasElement, "b")).toBe("A1"),
-		);
+		await waitFor(() => expect(getValue(canvasElement, "b")).toBe("A1"));
 
 		const editorB = findEditor(canvasElement, "b");
 		await userEvent.click(editorB);

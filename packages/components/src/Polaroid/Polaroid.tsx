@@ -39,12 +39,7 @@ export function Polaroid({
 			onClick={onClick}
 		>
 			{src ? (
-				<img
-					src={src}
-					alt={caption}
-					className={s.image}
-					draggable={false}
-				/>
+				<img src={src} alt={caption} className={s.image} draggable={false} />
 			) : (
 				<div className={s.placeholder} data-testid="polaroid-placeholder" />
 			)}

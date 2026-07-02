@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent } from "vitest/browser";
 import { expect, waitFor, within } from "storybook/test";
+import { userEvent } from "vitest/browser";
 import { Popover } from "./Popover.tsx";
 
 function Host() {
@@ -16,11 +16,7 @@ function Host() {
 				{({ close }) => (
 					<div>
 						<span data-testid="content">popover content</span>
-						<button
-							type="button"
-							data-testid="close-btn"
-							onClick={close}
-						>
+						<button type="button" data-testid="close-btn" onClick={close}>
 							dismiss
 						</button>
 					</div>
@@ -48,9 +44,7 @@ export const TriggerToggles: Story = {
 		expect(within(canvasElement).queryByTestId("content")).toBeNull();
 		await userEvent.click(trigger);
 		await waitFor(() =>
-			expect(
-				within(canvasElement).getByTestId("content"),
-			).toBeInTheDocument(),
+			expect(within(canvasElement).getByTestId("content")).toBeInTheDocument(),
 		);
 		await userEvent.click(trigger);
 		await waitFor(() =>
@@ -64,9 +58,7 @@ export const OutsideClickDismisses: Story = {
 	play: async ({ canvasElement }) => {
 		await userEvent.click(within(canvasElement).getByTestId("trigger"));
 		await waitFor(() =>
-			expect(
-				within(canvasElement).getByTestId("content"),
-			).toBeInTheDocument(),
+			expect(within(canvasElement).getByTestId("content")).toBeInTheDocument(),
 		);
 		await userEvent.click(within(canvasElement).getByTestId("outside"));
 		await waitFor(() =>

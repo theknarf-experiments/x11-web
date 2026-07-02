@@ -50,9 +50,8 @@ function Host(props: HostProps) {
 						) as HTMLElement
 					).getBoundingClientRect();
 					const probe = fnRef(rect.left + 80, rect.top + 90);
-					document.querySelector(
-						"[data-testid='probe-result']",
-					)!.textContent = `${probe.x}|${probe.y}`;
+					document.querySelector("[data-testid='probe-result']")!.textContent =
+						`${probe.x}|${probe.y}`;
 				}}
 			>
 				probe
@@ -76,9 +75,7 @@ export const RendersChildren: Story = {
 	args: {},
 	play: async ({ canvasElement }) => {
 		await waitFor(() =>
-			expect(
-				within(canvasElement).getByTestId("payload"),
-			).toBeInTheDocument(),
+			expect(within(canvasElement).getByTestId("payload")).toBeInTheDocument(),
 		);
 	},
 };
@@ -92,9 +89,7 @@ export const PageToCanvasReturnsTranslatedCoords: Story = {
 		const probeBtn = within(canvasElement).getByTestId("probe-pagetocanvas");
 		probeBtn.click();
 		const result = within(canvasElement).getByTestId("probe-result");
-		await waitFor(() =>
-			expect(result.textContent).toBe("80|90"),
-		);
+		await waitFor(() => expect(result.textContent).toBe("80|90"));
 	},
 };
 
@@ -146,9 +141,7 @@ export const ZoomIndicatorPresetSnaps: Story = {
 		);
 		await waitFor(() =>
 			expect(
-				parseFloat(
-					transformLayer.getAttribute("data-canvas-scale") ?? "1",
-				),
+				parseFloat(transformLayer.getAttribute("data-canvas-scale") ?? "1"),
 			).not.toBe(1),
 		);
 

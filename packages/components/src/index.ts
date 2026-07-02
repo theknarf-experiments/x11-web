@@ -4,8 +4,8 @@ export {
 	getAppContextMenuItems,
 } from "./AppContextMenu/AppContextMenu.tsx";
 export {
-	CanvasToolbar,
 	type CanvasTool,
+	CanvasToolbar,
 	TOOL_HOTKEYS,
 } from "./CanvasToolbar/CanvasToolbar.tsx";
 export {
@@ -13,8 +13,8 @@ export {
 	DiagnosticsPanel,
 } from "./DiagnosticsPanel/DiagnosticsPanel.tsx";
 export {
-	Dock,
 	DOCK_WINDOW_DRAG_MIME,
+	Dock,
 	type DockProcess,
 	type DockSidecar,
 	type DockWindow,

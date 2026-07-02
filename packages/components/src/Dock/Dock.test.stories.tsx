@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent } from "vitest/browser";
 import { expect, fn, waitFor, within } from "storybook/test";
+import { userEvent } from "vitest/browser";
 import { Dock, type DockProcess, type DockSidecar } from "./Dock.tsx";
 
 interface HostProps {
@@ -112,9 +112,6 @@ export const SpawnPopoverFlow: Story = {
 		await userEvent.type(argsInput, "-bg black");
 
 		await userEvent.click(within(canvasElement).getByTestId("spawn-submit"));
-		expect(args.onSpawn).toHaveBeenCalledWith("x11", "xterm", [
-			"-bg",
-			"black",
-		]);
+		expect(args.onSpawn).toHaveBeenCalledWith("x11", "xterm", ["-bg", "black"]);
 	},
 };

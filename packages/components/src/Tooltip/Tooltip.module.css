@@ -19,11 +19,7 @@
 	color: #ccc;
 	font-size: 11px;
 	font-family:
-		-apple-system,
-		BlinkMacSystemFont,
-		"SF Pro Text",
-		system-ui,
-		sans-serif;
+		-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
 	white-space: nowrap;
 	border-radius: 6px;
 	border: 1px solid rgba(255, 255, 255, 0.1);

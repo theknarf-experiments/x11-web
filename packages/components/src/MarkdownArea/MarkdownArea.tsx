@@ -71,10 +71,7 @@ export function MarkdownArea({ value, onChange, className }: Props) {
 		if (!el || !ec) return;
 		if (el.ownerDocument.activeElement !== el) return;
 		let remaining = ec.selectionStart;
-		const walker = el.ownerDocument.createTreeWalker(
-			el,
-			NodeFilter.SHOW_TEXT,
-		);
+		const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
 		let node = walker.nextNode() as Text | null;
 		while (node && remaining > node.data.length) {
 			remaining -= node.data.length;
@@ -164,13 +161,7 @@ export function MarkdownArea({ value, onChange, className }: Props) {
 			onKeyDown={(e) => {
 				// Chromium swallows Enter from `textupdate`; insert
 				// `\n` by hand and keep the EC in sync.
-				if (
-					e.key !== "Enter" ||
-					e.shiftKey ||
-					e.ctrlKey ||
-					e.metaKey
-				)
-					return;
+				if (e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
 				const ec = ecRef.current;
 				if (!ec) return;
 				e.preventDefault();

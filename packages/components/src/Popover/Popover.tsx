@@ -68,15 +68,8 @@ export function Popover({
 	const close = () => setOpen(false);
 
 	return (
-		<div
-			ref={wrapRef}
-			className={s.wrap}
-			data-popover-open={open || undefined}
-		>
-			<span
-				className={s.trigger}
-				onClick={() => setOpen((o) => !o)}
-			>
+		<div ref={wrapRef} className={s.wrap} data-popover-open={open || undefined}>
+			<span className={s.trigger} onClick={() => setOpen((o) => !o)}>
 				{trigger}
 			</span>
 			{open && (

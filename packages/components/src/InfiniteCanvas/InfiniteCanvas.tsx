@@ -13,7 +13,10 @@ interface InfiniteCanvasProps {
 	/// Called on drop with the drop point already translated into
 	/// canvas coordinates (camera-aware). Used to land dragged
 	/// polaroids onto the canvas at the cursor.
-	onCanvasDrop?: (point: { x: number; y: number }, event: React.DragEvent) => void;
+	onCanvasDrop?: (
+		point: { x: number; y: number },
+		event: React.DragEvent,
+	) => void;
 	/// Called when the user pointer-downs on empty canvas (not on a
 	/// window or any other child). Caller gets canvas-space coords
 	/// and the original event so it can attach window-level

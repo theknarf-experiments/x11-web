@@ -20,7 +20,9 @@ export const RendersImage: Story = {
 	play: async ({ canvasElement }) => {
 		const polaroid = within(canvasElement).getByTestId("polaroid");
 		expect(polaroid.querySelector("img")).toBeTruthy();
-		expect(within(canvasElement).queryByTestId("polaroid-placeholder")).toBeNull();
+		expect(
+			within(canvasElement).queryByTestId("polaroid-placeholder"),
+		).toBeNull();
 		expect(polaroid.textContent).toContain("Test photo");
 	},
 };

@@ -54,7 +54,11 @@ const panelStyle: React.CSSProperties = {
 export const Default: Story = {
 	args: {
 		side: "top",
-		trigger: <button type="button" style={buttonStyle}>Open</button>,
+		trigger: (
+			<button type="button" style={buttonStyle}>
+				Open
+			</button>
+		),
 		children: <div style={panelStyle}>Hello from the popover!</div>,
 	},
 };
@@ -64,7 +68,11 @@ export const Default: Story = {
 export const WithCloseRenderProp: Story = {
 	args: {
 		side: "top",
-		trigger: <button type="button" style={buttonStyle}>Pick a colour</button>,
+		trigger: (
+			<button type="button" style={buttonStyle}>
+				Pick a colour
+			</button>
+		),
 	},
 	render: (args) => (
 		<Popover {...args}>

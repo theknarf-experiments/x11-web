@@ -214,10 +214,7 @@ export function GlobalMenuBar({
 					<div className={s.authSpacer} />
 					{auth.user ? (
 						<>
-							<span
-								className={s.authEmail}
-								data-testid="auth-email"
-							>
+							<span className={s.authEmail} data-testid="auth-email">
 								{auth.user.email ?? "signed in"}
 							</span>
 							<button
@@ -313,11 +310,7 @@ function MenuDropdown({ items, onActivate }: MenuDropdownProps) {
 	const [openId, setOpenId] = useState<string | null>(null);
 
 	return (
-		<div
-			className={s.dropdown}
-			role="menu"
-			data-testid="global-menu-dropdown"
-		>
+		<div className={s.dropdown} role="menu" data-testid="global-menu-dropdown">
 			{items.map((item) => {
 				if (item.kind === "separator") {
 					return <div key={item.id} className={s.separator} role="none" />;

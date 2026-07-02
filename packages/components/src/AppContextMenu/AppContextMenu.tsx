@@ -82,9 +82,7 @@ export function AppContextMenu({
 				<button
 					key={item.label}
 					type="button"
-					className={
-						item.destructive ? s.menuItemDestructive : s.menuItem
-					}
+					className={item.destructive ? s.menuItemDestructive : s.menuItem}
 					data-testid="app-context-menu-item"
 					onClick={() => {
 						item.onSelect();

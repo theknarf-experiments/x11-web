@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent } from "vitest/browser";
 import { expect, waitFor, within } from "storybook/test";
+import { userEvent } from "vitest/browser";
 import { Tooltip } from "./Tooltip.tsx";
 
 function Host({ label, hotkey }: { label: string; hotkey?: string }) {
@@ -42,17 +42,13 @@ export const HoverShowsBubble: Story = {
 		expect(getComputedStyle(bubble).opacity).toBe("0");
 
 		await userEvent.hover(trigger);
-		await waitFor(() =>
-			expect(getComputedStyle(bubble).opacity).toBe("1"),
-		);
+		await waitFor(() => expect(getComputedStyle(bubble).opacity).toBe("1"));
 
 		// Bubble content matches the props.
 		expect(bubble.textContent).toContain("Save");
 		expect(bubble.textContent).toContain("⌘S");
 
 		await userEvent.unhover(trigger);
-		await waitFor(() =>
-			expect(getComputedStyle(bubble).opacity).toBe("0"),
-		);
+		await waitFor(() => expect(getComputedStyle(bubble).opacity).toBe("0"));
 	},
 };

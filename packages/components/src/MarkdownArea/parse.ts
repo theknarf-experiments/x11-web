@@ -49,7 +49,12 @@ export function parseDecorations(text: string): Decoration[] {
 		switch (node.type) {
 			case "heading": {
 				const depth = Math.min(6, Math.max(1, node.depth)) as
-					| 1 | 2 | 3 | 4 | 5 | 6;
+					| 1
+					| 2
+					| 3
+					| 4
+					| 5
+					| 6;
 				out.push({ start, end, type: `heading-${depth}` });
 				break;
 			}

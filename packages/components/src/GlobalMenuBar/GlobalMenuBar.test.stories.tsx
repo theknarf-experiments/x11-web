@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent } from "vitest/browser";
 import { expect, fn, waitFor, within } from "storybook/test";
+import { userEvent } from "vitest/browser";
 import {
 	GlobalMenuBar,
 	type MenuAction,
@@ -108,17 +108,13 @@ export const HoverCruisesBetweenTopMenus: Story = {
 		await userEvent.click(tops[0]!); // open File
 		// File's dropdown shows "New" + "Quit"
 		await waitFor(() =>
-			expect(
-				within(canvasElement).getByText("New"),
-			).toBeInTheDocument(),
+			expect(within(canvasElement).getByText("New")).toBeInTheDocument(),
 		);
 
 		// Hover Edit — should switch the open dropdown.
 		await userEvent.hover(tops[1]!);
 		await waitFor(() =>
-			expect(
-				within(canvasElement).getByText("Undo"),
-			).toBeInTheDocument(),
+			expect(within(canvasElement).getByText("Undo")).toBeInTheDocument(),
 		);
 		// And File's "New" is no longer rendered.
 		expect(within(canvasElement).queryByText("New")).toBeNull();

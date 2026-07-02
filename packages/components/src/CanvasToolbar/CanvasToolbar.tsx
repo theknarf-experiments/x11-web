@@ -83,10 +83,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 						strokeWidth={1.5}
 						strokeLinecap="round"
 					/>
-					<polygon
-						points="13,4 9,4 13,8"
-						fill="currentColor"
-					/>
+					<polygon points="13,4 9,4 13,8" fill="currentColor" />
 				</svg>
 			</ToolButton>
 			<ToolButton

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { page, userEvent } from "vitest/browser";
-import { expect, waitFor, within } from "storybook/test";
 import { useState } from "react";
+import { expect, waitFor, within } from "storybook/test";
+import { page, userEvent } from "vitest/browser";
 import { MarkdownArea } from "./MarkdownArea.tsx";
 
 /** Test host that captures every value the component reports so
@@ -84,9 +84,7 @@ export const EnterInsertsNewline: Story = {
 		await userEvent.keyboard("hello");
 		await userEvent.keyboard("{Enter}");
 		await userEvent.keyboard("world");
-		await waitFor(() =>
-			expect(getValue(canvasElement)).toBe("hello\nworld"),
-		);
+		await waitFor(() => expect(getValue(canvasElement)).toBe("hello\nworld"));
 	},
 };
 
@@ -118,14 +116,12 @@ export const RealClickPositionsCaret: Story = {
 		range.setEnd(textNode, 6);
 		const targetRect = range.getBoundingClientRect();
 		const editorRect = editor.getBoundingClientRect();
-		await page
-			.elementLocator(editor)
-			.click({
-				position: {
-					x: targetRect.x - editorRect.x,
-					y: targetRect.y + targetRect.height / 2 - editorRect.y,
-				},
-			});
+		await page.elementLocator(editor).click({
+			position: {
+				x: targetRect.x - editorRect.x,
+				y: targetRect.y + targetRect.height / 2 - editorRect.y,
+			},
+		});
 		await userEvent.keyboard("X");
 		await waitFor(() => expect(getValue(canvasElement)).toBe("Hello XWorld"));
 	},
@@ -155,18 +151,14 @@ export const TypeThenClickThenType: Story = {
 		range.setEnd(textNode, 6);
 		const targetRect = range.getBoundingClientRect();
 		const editorRect = editor.getBoundingClientRect();
-		await page
-			.elementLocator(editor)
-			.click({
-				position: {
-					x: targetRect.x - editorRect.x,
-					y: targetRect.y + targetRect.height / 2 - editorRect.y,
-				},
-			});
+		await page.elementLocator(editor).click({
+			position: {
+				x: targetRect.x - editorRect.x,
+				y: targetRect.y + targetRect.height / 2 - editorRect.y,
+			},
+		});
 		await userEvent.keyboard("X");
-		await waitFor(() =>
-			expect(getValue(canvasElement)).toBe("Hello XWorld"),
-		);
+		await waitFor(() => expect(getValue(canvasElement)).toBe("Hello XWorld"));
 	},
 };
 
@@ -310,4 +302,3 @@ function findFirstTextNode(root: Node): Text {
 	}
 	return node;
 }
-
