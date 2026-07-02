@@ -1,8 +1,5 @@
 {
-  "permissions": {
-    "deny": [
-      "Bash(npm:*)",
-      "Bash(npx:*)"
-    ]
-  }
+	"permissions": {
+		"deny": ["Bash(npm:*)", "Bash(npx:*)"]
+	}
 }

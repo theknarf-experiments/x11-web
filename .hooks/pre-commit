@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pre-commit hook: typecheck every TS workspace before letting the
-# commit through.
+# Pre-commit hook: format-check + typecheck every TS workspace
+# before letting the commit through.
 #
 # Activated repo-wide via `mise run install-hooks` (one-shot,
 # per clone — sets `core.hooksPath` to `.hooks/`).
@@ -14,6 +14,11 @@ set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
+
+# Formatting check (no writes) — fails if any file diverges from
+# biome's formatting; fix with `pnpm format`. Runs first since it
+# finishes in milliseconds.
+pnpm exec biome format .
 
 # Use `pnpm exec` so the locally-installed `turbo` is on PATH
 # regardless of the dev's global setup.
