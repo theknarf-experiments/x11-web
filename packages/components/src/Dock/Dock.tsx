@@ -30,6 +30,32 @@ export interface DockWindow {
  *  same constant. */
 export const DOCK_WINDOW_DRAG_MIME = "application/x-x11web-window-id";
 
+/** Superellipse |x/r|^n + |y/r|^n = 1 sampled into a closed SVG
+ *  path. n=5 is the Apple "squircle" exponent; rendered as an inline
+ *  SVG (rather than CSS `corner-shape`) so every browser gets the
+ *  continuous-corner shape. */
+function superellipsePath(size: number, n = 5, steps = 128): string {
+	const r = size / 2;
+	const pts: string[] = [];
+	for (let i = 0; i < steps; i++) {
+		const t = (i / steps) * 2 * Math.PI;
+		const c = Math.cos(t);
+		const s = Math.sin(t);
+		const x = r + r * Math.sign(c) * Math.abs(c) ** (2 / n);
+		const y = r + r * Math.sign(s) * Math.abs(s) ** (2 / n);
+		pts.push(`${x.toFixed(2)} ${y.toFixed(2)}`);
+	}
+	return `M${pts.join("L")}Z`;
+}
+
+const ICON_SIZE = 48;
+const SQUIRCLE_PATH = superellipsePath(ICON_SIZE);
+
+/** Peak scale of the icon directly under the cursor. */
+const MAGNIFY_MAX = 1.5;
+/** Horizontal falloff distance (px) on either side of the cursor. */
+const MAGNIFY_RANGE = 96;
+
 interface DockProps {
 	connected: boolean;
 	sidecars: DockSidecar[];
@@ -65,6 +91,45 @@ export function Dock({
 	const [command, setCommand] = useState("xeyes");
 	const [args, setArgs] = useState("");
 	const spawnRowRef = useRef<HTMLDivElement>(null);
+	const dockRef = useRef<HTMLDivElement>(null);
+
+	/** macOS-style magnification: each icon scales by a cos² falloff
+	 *  of its horizontal distance to the cursor. Applied imperatively
+	 *  via the `--magnify` custom property so pointermove doesn't
+	 *  re-render React; CSS transitions smooth the motion. */
+	function applyMagnify(mouseX: number | null) {
+		const dock = dockRef.current;
+		if (!dock) return;
+		for (const el of dock.querySelectorAll<HTMLElement>("[data-magnify]")) {
+			if (mouseX === null) {
+				el.style.removeProperty("--magnify");
+				continue;
+			}
+			const rect = el.getBoundingClientRect();
+			const dist = Math.abs(mouseX - (rect.left + rect.width / 2));
+			if (dist > MAGNIFY_RANGE) {
+				el.style.removeProperty("--magnify");
+				continue;
+			}
+			const scale =
+				1 +
+				(MAGNIFY_MAX - 1) *
+					Math.cos((dist / MAGNIFY_RANGE) * (Math.PI / 2)) ** 2;
+			el.style.setProperty("--magnify", scale.toFixed(3));
+		}
+	}
+
+	function handleDockPointerMove(e: React.PointerEvent) {
+		if (e.pointerType === "touch") return;
+		// The spawn popover is a child of the dock but floats above the
+		// bar — don't magnify while the cursor is up there.
+		const rect = dockRef.current?.getBoundingClientRect();
+		if (rect && e.clientY < rect.top) {
+			applyMagnify(null);
+			return;
+		}
+		applyMagnify(e.clientX);
+	}
 
 	// Outside-click closes whichever popover is open.
 	useEffect(() => {
@@ -97,7 +162,13 @@ export function Dock({
 	}
 
 	return (
-		<div className={s.dock} data-testid="dock">
+		<div
+			ref={dockRef}
+			className={s.dock}
+			data-testid="dock"
+			onPointerMove={handleDockPointerMove}
+			onPointerLeave={() => applyMagnify(null)}
+		>
 			{/* App icons — one per process */}
 			{processes.map((proc) => (
 				<ViewTransition
@@ -109,16 +180,25 @@ export function Dock({
 						<button
 							type="button"
 							className={s.iconButton}
-							style={{ background: proc.color }}
 							onClick={() => onFocusWindow(proc.sidecarId, proc.pid)}
 							onContextMenu={(e) =>
 								handleContextMenu(e, proc.sidecarId, proc.pid)
 							}
 							data-testid="process-icon"
 							data-pid={proc.pid}
+							data-magnify
 						>
+							<svg
+								className={s.iconShape}
+								viewBox={`0 0 ${ICON_SIZE} ${ICON_SIZE}`}
+								aria-hidden="true"
+							>
+								<path d={SQUIRCLE_PATH} fill={proc.color} />
+							</svg>
 							<span className={s.runningDot} />
-							{proc.title.charAt(0).toUpperCase()}
+							<span className={s.glyph}>
+								{proc.title.charAt(0).toUpperCase()}
+							</span>
 						</button>
 					</Tooltip>
 				</ViewTransition>
@@ -144,14 +224,22 @@ export function Dock({
 									}}
 									data-testid="spawn-button"
 									data-sidecar-id={sc.id}
+									data-magnify
 								>
+									<svg
+										className={s.iconShape}
+										viewBox={`0 0 ${ICON_SIZE} ${ICON_SIZE}`}
+										aria-hidden="true"
+									>
+										<path d={SQUIRCLE_PATH} />
+									</svg>
 									<span className={s.statusDot}>
 										<span
 											className={`${s.statusDotInner} ${connected ? s.online : s.offline}`}
 											data-testid="connection-status"
 										/>
 									</span>
-									+
+									<span className={s.glyph}>+</span>
 								</button>
 							</Tooltip>
 
