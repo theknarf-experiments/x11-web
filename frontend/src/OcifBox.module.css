@@ -5,6 +5,17 @@
 	box-sizing: border-box;
 }
 
+/* Fill + stroke layer. The div itself paints nothing; the SVG rect
+ * draws both so boxes stroke identically to arrows and paths. It
+ * sits below the text layer and handles (positioned siblings later
+ * in the DOM paint above it). */
+.shape {
+	position: absolute;
+	inset: 0;
+	display: block;
+	pointer-events: none;
+}
+
 /* Selection halo. Sits OUTSIDE the box (so it doesn't overlap the
  * white border) and inherits the box's border-radius via the
  * inline style — box-shadow's spread radius respects the host

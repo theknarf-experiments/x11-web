@@ -43,11 +43,14 @@ const DEFAULT_RADIUS = 6;
 const HANDLES: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
 /** One `@ocif/rect` node rendered as an absolute-positioned div in
- *  canvas space. Uses `border` + `box-sizing: border-box` so the
- *  rendered outer width / height match the doc-stored OCIF size
- *  exactly (the border draws *inside* the box, not outside). The
- *  border-radius is a render-time treatment — not part of the
- *  `@ocif/rect` spec — so it stays in CSS rather than the doc. */
+ *  canvas space. The fill and stroke are drawn by an inline SVG
+ *  `<rect>` (matching OcifArrow / OcifPath, which are SVG-stroked)
+ *  rather than a CSS border. The rect is inset by half the stroke
+ *  width so the stroke's outer edge lands exactly on the doc-stored
+ *  OCIF bounds — same invariant the old `border-box` border kept.
+ *  The border-radius is a render-time treatment — not part of the
+ *  `@ocif/rect` spec — so it stays out of the doc; it remains on the
+ *  div too so the selection halo (box-shadow) follows the corners. */
 export function OcifBox({
 	id,
 	node,
@@ -82,6 +85,11 @@ export function OcifBox({
 	const stroke = node.rect?.stroke_color ?? DEFAULT_STROKE;
 	const strokeWidth = node.rect?.stroke_width ?? DEFAULT_STROKE_WIDTH;
 	const className = dropTarget ? s.dropTarget : selected ? s.selected : s.box;
+	// SVG strokes are centered on the path; inset the rect by half the
+	// stroke so its outer edge sits on the box bounds. Sizes clamp to
+	// 0 for the degenerate frames mid drag-create.
+	const inset = strokeWidth / 2;
+	const rectRadius = Math.max(0, DEFAULT_RADIUS - inset);
 	return (
 		<div
 			data-testid="ocif-box"
@@ -95,12 +103,22 @@ export function OcifBox({
 				width: node.width,
 				height: node.height,
 				zIndex: Math.round(node.z),
-				background: fill,
-				border: `${strokeWidth}px solid ${stroke}`,
 				borderRadius: DEFAULT_RADIUS,
 			}}
 			onPointerDown={handlePointerDown}
 		>
+			<svg className={s.shape} aria-hidden="true" width="100%" height="100%">
+				<rect
+					x={inset}
+					y={inset}
+					width={Math.max(0, node.width - strokeWidth)}
+					height={Math.max(0, node.height - strokeWidth)}
+					rx={rectRadius}
+					fill={fill}
+					stroke={stroke}
+					strokeWidth={strokeWidth}
+				/>
+			</svg>
 			<OcifTextLayer
 				id={id}
 				text={node.text ?? ""}
