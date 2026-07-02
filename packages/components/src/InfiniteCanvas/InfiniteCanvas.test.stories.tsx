@@ -158,6 +158,43 @@ export const ZoomIndicatorPresetSnaps: Story = {
 	},
 };
 
+/** `will-change: transform` is applied only while a wheel gesture
+ *  is in flight and dropped once it settles. Leaving it on
+ *  permanently keeps the whole canvas on one cached compositor
+ *  raster, so zoomed-in vectors and text render blurry. */
+export const WillChangeScopedToGesture: Story = {
+	args: {},
+	play: async ({ canvasElement }) => {
+		const viewport = within(canvasElement).getByTestId("infinite-canvas");
+		const transformLayer = viewport.querySelector(
+			"[data-canvas-scale]",
+		) as HTMLElement;
+
+		// At rest the layer must not be promoted.
+		expect(transformLayer.style.willChange).toBe("auto");
+
+		viewport.dispatchEvent(
+			new WheelEvent("wheel", {
+				bubbles: true,
+				cancelable: true,
+				ctrlKey: true,
+				deltaY: -100,
+				clientX: 100,
+				clientY: 100,
+			}),
+		);
+
+		// Promoted during the gesture…
+		await waitFor(() =>
+			expect(transformLayer.style.willChange).toBe("transform"),
+		);
+		// …and demoted again once the gesture settles (150ms idle).
+		await waitFor(() => expect(transformLayer.style.willChange).toBe("auto"), {
+			timeout: 2000,
+		});
+	},
+};
+
 /** `ctrl + wheel` zooms the canvas around the cursor. The inner
  *  transform layer exposes the new scale via `data-canvas-scale`
  *  for inspection. */

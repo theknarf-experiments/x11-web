@@ -50,6 +50,15 @@ export function InfiniteCanvas({
 	cameraRef.current = camera;
 	const viewportRef = useRef<HTMLDivElement>(null);
 
+	// True while a wheel pan/zoom gesture is in flight. Drives
+	// `will-change: transform` on the transform layer: promoted to a
+	// compositor layer only *during* the gesture (smooth motion), then
+	// demoted once it settles so the browser re-rasterizes vectors and
+	// text crisply at the final scale. A permanent `will-change` keeps
+	// the whole canvas on one cached raster, which is what made zoomed
+	// content blurry.
+	const [gestureActive, setGestureActive] = useState(false);
+
 	// Jump the camera to a specific scale, keeping the canvas point
 	// currently under the viewport's centre anchored. Used by the
 	// preset menu — pure scroll-zoom can't snap precisely to round
@@ -76,9 +85,18 @@ export function InfiniteCanvas({
 		const el = viewportRef.current;
 		if (!el) return;
 
+		let settleTimer: number | null = null;
+
 		const onWheel = (e: WheelEvent) => {
 			e.preventDefault();
 			const cam = cameraRef.current;
+
+			setGestureActive(true);
+			if (settleTimer !== null) clearTimeout(settleTimer);
+			settleTimer = window.setTimeout(() => {
+				settleTimer = null;
+				setGestureActive(false);
+			}, 150);
 
 			if (e.ctrlKey || e.metaKey) {
 				// Zoom (cmd+scroll or pinch-to-zoom — trackpad pinch fires as ctrlKey+wheel)
@@ -109,7 +127,10 @@ export function InfiniteCanvas({
 		};
 
 		el.addEventListener("wheel", onWheel, { passive: false });
-		return () => el.removeEventListener("wheel", onWheel);
+		return () => {
+			el.removeEventListener("wheel", onWheel);
+			if (settleTimer !== null) clearTimeout(settleTimer);
+		};
 	}, []);
 
 	const transform = `scale(${camera.scale}) translate(${-camera.x}px, ${-camera.y}px)`;
@@ -186,7 +207,10 @@ export function InfiniteCanvas({
 		>
 			<div
 				className={s.transform}
-				style={{ transform }}
+				style={{
+					transform,
+					willChange: gestureActive ? "transform" : "auto",
+				}}
 				data-canvas-scale={camera.scale}
 			>
 				{children}
