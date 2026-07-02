@@ -11,15 +11,23 @@ async function execInSidecar(
 	cmd: string,
 	_timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
+	const result = await container.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; ${cmd}`,
+	]);
 	return result.output.trim();
 }
 
 test.describe("DBE functional conformance", () => {
-	test("DBE: allocate, draw, swap, and verify back buffer cycle", async ({ sidecarContainer }) => {
+	test("DBE: allocate, draw, swap, and verify back buffer cycle", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display",
 				"d = Xlib.display.Display()",
 				"root = d.screen().root",
@@ -39,10 +47,14 @@ test.describe("DBE functional conformance", () => {
 		expect(result.output).toContain("dbe_present=True");
 	});
 
-	test("DBE: GetVisualInfo returns buffer visual info", async ({ sidecarContainer }) => {
+	test("DBE: GetVisualInfo returns buffer visual info", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"xdpyinfo -ext DOUBLE-BUFFER 2>&1 | grep -i 'visual\\|buffer\\|perf' | head -20",
 				"echo DBE_VISUAL_PASS",

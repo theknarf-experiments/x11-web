@@ -30,9 +30,7 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-function mount(
-	onBell: (cb: ((p: number) => void) | null) => void,
-): void {
+function mount(onBell: (cb: ((p: number) => void) | null) => void): void {
 	act(() => {
 		root = createRoot(container);
 		root.render(createElement(BellHost, { onBell }));

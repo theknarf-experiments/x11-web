@@ -128,7 +128,9 @@ export function pathBoundsFromPoints(
 function svgPathFromPolygon(points: Array<[number, number]>): string {
 	if (points.length === 0) return "";
 	const len = points.length;
-	const parts: string[] = [`M${points[0][0].toFixed(2)},${points[0][1].toFixed(2)}`];
+	const parts: string[] = [
+		`M${points[0][0].toFixed(2)},${points[0][1].toFixed(2)}`,
+	];
 	parts.push("Q");
 	for (let i = 0; i < len; i++) {
 		const [x0, y0] = points[i];
@@ -179,10 +181,7 @@ export function solveFontSizeForCornerTarget(input: {
 		);
 		const cornerX = input.anchorX + input.signX * b.width;
 		const cornerY = input.anchorY + input.signY * b.height;
-		return Math.hypot(
-			cornerX - input.cursorX,
-			cornerY - input.cursorY,
-		);
+		return Math.hypot(cornerX - input.cursorX, cornerY - input.cursorY);
 	};
 	let lo = FONT_MIN;
 	let hi = FONT_MAX;
@@ -652,8 +651,11 @@ export function insertOcifNode(
 	// the caller's geometry (markdown notes are user-resizable and
 	// scroll their content).
 	const isAutoFitText =
-		!node.rect && !node.arrow && !node.path && !node.window
-			&& mimeType === "text/plain";
+		!node.rect &&
+		!node.arrow &&
+		!node.path &&
+		!node.window &&
+		mimeType === "text/plain";
 	const measured = isAutoFitText
 		? measureTextNodeBounds(
 				node.text ?? "",
@@ -818,11 +820,7 @@ export function setOcifNodeBounds(
  *
  *  Text-only nodes (no `rect` / `arrow`) auto-resize to fit the
  *  measured text; boxes keep their user-set bounds. */
-export function setOcifNodeText(
-	workspaceId: string,
-	id: string,
-	text: string,
-) {
+export function setOcifNodeText(workspaceId: string, id: string, text: string) {
 	const entry = ensure(workspaceId);
 	if (!(entry.doc.nodes ?? {})[id]) return;
 	entry.doc = Automerge.change(entry.doc, (d) => {
@@ -898,11 +896,7 @@ export function setOcifNodeFontSize(
  *  not a hydrated `WorkspaceDoc` value — the type annotation is
  *  loose here because `Automerge.updateText` / `Automerge.splice`
  *  expect the proxy and not a typed view. */
-function writeText(
-	d: WorkspaceDoc,
-	n: OcifNode,
-	text: string,
-): void {
+function writeText(d: WorkspaceDoc, n: OcifNode, text: string): void {
 	if (!d.resources) d.resources = {};
 	let resourceId = n.resource;
 	if (!resourceId) {
@@ -977,7 +971,10 @@ function isPlainTextNode(d: WorkspaceDoc, n: OcifNode): boolean {
 }
 
 /** Helper — measure node bounds from current text + textstyle. */
-function boundsForNode(n: OcifNode, text: string): { width: number; height: number } {
+function boundsForNode(
+	n: OcifNode,
+	text: string,
+): { width: number; height: number } {
 	const ts = n.text_style;
 	return measureTextNodeBounds(
 		text,
@@ -1084,10 +1081,7 @@ export function setOcifArrowAnchor(
 		} else {
 			if (n.edge) {
 				delete n.edge[end];
-				if (
-					n.edge.start === undefined &&
-					n.edge.end === undefined
-				) {
+				if (n.edge.start === undefined && n.edge.end === undefined) {
 					delete n.edge;
 				}
 			}
@@ -1108,7 +1102,6 @@ export function setOcifArrowAnchor(
 	});
 	scheduleFlush(workspaceId);
 }
-
 
 /** Delete a node from the workspace. Also drops any edges that
  *  referenced this node — a dangling edge with a missing endpoint

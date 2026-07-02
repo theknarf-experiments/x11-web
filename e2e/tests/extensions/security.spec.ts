@@ -11,7 +11,11 @@ async function execInSidecar(
 	cmd: string,
 	_timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
+	const result = await container.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; ${cmd}`,
+	]);
 	return result.output.trim();
 }
 
@@ -29,7 +33,9 @@ test.describe("SECURITY extension", () => {
 	test("SECURITY extension is listed", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"xdpyinfo 2>&1 | grep -i security || echo 'not_found'",
 				"echo SECURITY_EXT_PASS",
@@ -39,23 +45,26 @@ test.describe("SECURITY extension", () => {
 	});
 });
 
-test.describe.serial("SECURITY extension compliance", () => {
-	test("SECURITY extension is advertised", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo -queryExtensions 2>&1 || true",
-		);
-		expect(output).toContain("SECURITY");
+test.describe
+	.serial("SECURITY extension compliance", () => {
+		test("SECURITY extension is advertised", async ({ sidecarContainer }) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo -queryExtensions 2>&1 || true",
+			);
+			expect(output).toContain("SECURITY");
+		});
 	});
-});
 
-test.describe.serial("SECURITY extension", () => {
-	test.setTimeout(60_000);
+test.describe
+	.serial("SECURITY extension", () => {
+		test.setTimeout(60_000);
 
-	test("SECURITY extension is present", async ({ sidecarContainer }) => {
-		const output = await probe(sidecarContainer, "security_extension_present.py");
-		expect(output).toContain("SECURITY_OK");
+		test("SECURITY extension is present", async ({ sidecarContainer }) => {
+			const output = await probe(
+				sidecarContainer,
+				"security_extension_present.py",
+			);
+			expect(output).toContain("SECURITY_OK");
+		});
 	});
-});

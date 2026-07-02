@@ -11,13 +11,21 @@ async function execInSidecar(
 	cmd: string,
 	_timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
+	const result = await container.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; ${cmd}`,
+	]);
 	return result.output.trim();
 }
 
 async function killApps(container: StartedTestContainer): Promise<void> {
 	await container
-		.exec(["bash", "-c", "pkill -9 -f 'xeyes|xterm|xlogo|xclock|firefox|gimp|gtk|gnome|libreoffice|soffice|emacs|qterminal|wish|glmark|x11perf' 2>/dev/null; true"])
+		.exec([
+			"bash",
+			"-c",
+			"pkill -9 -f 'xeyes|xterm|xlogo|xclock|firefox|gimp|gtk|gnome|libreoffice|soffice|emacs|qterminal|wish|glmark|x11perf' 2>/dev/null; true",
+		])
 		.catch(() => {});
 	await new Promise((r) => setTimeout(r, 1000));
 }
@@ -26,10 +34,11 @@ test.describe("GLX display lists", () => {
 	test("glxgears runs without errors", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"timeout 5 glxgears -info 2>&1 || true",
-			].join("\n"),
+			"bash",
+			"-c",
+			["export DISPLAY=:99", "timeout 5 glxgears -info 2>&1 || true"].join(
+				"\n",
+			),
 		]);
 		// glxgears should produce some output about GL renderer
 		// and not crash (exit code != 139)
@@ -39,7 +48,9 @@ test.describe("GLX display lists", () => {
 	test("glmark2 benchmark runs without crash", async ({ sidecarContainer }) => {
 		test.setTimeout(60_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"export LIBGL_ALWAYS_SOFTWARE=1",
 				"timeout 15 glmark2 --benchmark build:use-vbo=false --benchmark texture --run-forever --size 200x200 2>&1 || true",
@@ -50,7 +61,9 @@ test.describe("GLX display lists", () => {
 });
 
 test.describe("GLX extension client info", () => {
-	test("glxinfo connects and retrieves vendor string", async ({ sidecarContainer }) => {
+	test("glxinfo connects and retrieves vendor string", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",
@@ -60,33 +73,39 @@ test.describe("GLX extension client info", () => {
 				"glxinfo 2>&1 | head -20",
 				"echo '---'",
 				"VENDOR=$(glxinfo 2>&1 | grep -i 'server vendor' || echo 'none')",
-				"echo \"vendor=$VENDOR\"",
+				'echo "vendor=$VENDOR"',
 				"# glxinfo sends GLX_CLIENT_INFO during setup. If our server crashes",
 				"# or returns an error, glxinfo exits non-zero. Getting here means success.",
 				"echo 'PASS: glxinfo completed successfully'",
 			].join("\n"),
 		]);
-		expect(result.output).toContain(
-			"PASS: glxinfo completed successfully",
-		);
+		expect(result.output).toContain("PASS: glxinfo completed successfully");
 	});
 });
 
 test.describe("GLX conformance", () => {
-	test("GLX: glxinfo reports Mesa and indirect rendering", async ({ sidecarContainer }) => {
+	test("GLX: glxinfo reports Mesa and indirect rendering", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", "export DISPLAY=:99 && glxinfo 2>&1 | head -30",
+			"bash",
+			"-c",
+			"export DISPLAY=:99 && glxinfo 2>&1 | head -30",
 		]);
 		if (result.exitCode === 0) {
 			expect(result.output).toMatch(/OpenGL vendor|client glx vendor/i);
 		}
 	});
 
-	test("GLX: context creation and destruction", async ({ sidecarContainer }) => {
+	test("GLX: context creation and destruction", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display",
 				"d = Xlib.display.Display()",
 				"glx = d.query_extension('GLX')",
@@ -102,7 +121,9 @@ test.describe("GLX conformance", () => {
 	test("GLX: glxgears renders frames", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"timeout 3 glxgears 2>&1 | head -5",
 				"echo GLX_GEARS_PASS",
@@ -111,10 +132,14 @@ test.describe("GLX conformance", () => {
 		expect(result.output).toContain("GLX_GEARS_PASS");
 	});
 
-	test("GLX: FBConfig enumeration returns configs", async ({ sidecarContainer }) => {
+	test("GLX: FBConfig enumeration returns configs", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"glxinfo 2>&1 | grep -c 'GLX Visuals' || echo 0",
 				"glxinfo -B 2>&1 | grep -i 'fbconfig' | head -5",
@@ -140,12 +165,16 @@ test.describe("GLX extension", () => {
 		// or fail GLX setup in software-pipe mode) but the X server
 		// must stay up afterwards and the run must not segfault.
 		const result = await sidecarContainer.exec([
-			"bash", "-c", "timeout 2 glxgears -info 2>&1 || true",
+			"bash",
+			"-c",
+			"timeout 2 glxgears -info 2>&1 || true",
 		]);
 		expect(result.output).not.toContain("Segmentation fault");
 		expect(result.output).not.toContain("[xcb] Extra reply data");
 		const alive = await sidecarContainer.exec([
-			"bash", "-c", "xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			"bash",
+			"-c",
+			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
 		]);
 		expect(alive.output).toContain("alive");
 	});
@@ -158,15 +187,14 @@ test.describe("Orphan: GLX integration", () => {
 		await killApps(sidecarContainer);
 	});
 
-	test("glxinfo reports working GLX with OSMesa", async ({ sidecarContainer }) => {
+	test("glxinfo reports working GLX with OSMesa", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",
-			[
-				"export DISPLAY=:99",
-				"glxinfo 2>&1 | head -20",
-			].join("\n"),
+			["export DISPLAY=:99", "glxinfo 2>&1 | head -20"].join("\n"),
 		]);
 		console.log(`glxinfo: exit=${result.exitCode}`);
 		console.log(result.output.substring(0, 500));
@@ -184,7 +212,8 @@ test.describe("Orphan: GLX integration", () => {
 		// "glxgears crashes the server", which `xdpyinfo` after the run
 		// detects reliably.
 		const result = await sidecarContainer.exec([
-			"bash", "-c",
+			"bash",
+			"-c",
 			[
 				"export DISPLAY=:99",
 				"timeout 3 glxgears -geometry 300x300+50+50 >/dev/null 2>&1 || true",
@@ -195,243 +224,237 @@ test.describe("Orphan: GLX integration", () => {
 	});
 });
 
-test.describe.serial("Real-world application smoke tests", () => {
-	test.afterEach(async ({ sidecarContainer }) => {
-		await killApps(sidecarContainer);
-	});
+test.describe
+	.serial("Real-world application smoke tests", () => {
+		test.afterEach(async ({ sidecarContainer }) => {
+			await killApps(sidecarContainer);
+		});
 
-	test("xterm starts, renders prompt, and accepts keystrokes", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(30_000);
-
-		await execInSidecar(
+		test("xterm starts, renders prompt, and accepts keystrokes", async ({
 			sidecarContainer,
-			"xterm -e 'echo XTERM_STARTED > /tmp/xterm_smoke; sleep 2' &",
-		);
-		await new Promise((r) => setTimeout(r, 5000));
+		}) => {
+			test.setTimeout(30_000);
 
-		const output = await execInSidecar(
+			await execInSidecar(
+				sidecarContainer,
+				"xterm -e 'echo XTERM_STARTED > /tmp/xterm_smoke; sleep 2' &",
+			);
+			await new Promise((r) => setTimeout(r, 5000));
+
+			const output = await execInSidecar(
+				sidecarContainer,
+				"cat /tmp/xterm_smoke 2>/dev/null || echo NOT_FOUND",
+			);
+			expect(output).toContain("XTERM_STARTED");
+
+			// Verify xterm doesn't crash the server
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
+
+		test("Firefox ESR starts and creates a window", async ({
 			sidecarContainer,
-			"cat /tmp/xterm_smoke 2>/dev/null || echo NOT_FOUND",
-		);
-		expect(output).toContain("XTERM_STARTED");
+		}) => {
+			test.setTimeout(60_000);
 
-		// Verify xterm doesn't crash the server
-		const alive = await execInSidecar(
+			// Start Firefox in headless-like mode with minimal UI
+			await execInSidecar(
+				sidecarContainer,
+				"timeout 30 firefox-esr --no-remote --new-instance about:blank &",
+			);
+			await new Promise((r) => setTimeout(r, 15000));
+
+			// Firefox should have created at least one window
+			const wmctrl = await execInSidecar(
+				sidecarContainer,
+				"xdotool search --name '' 2>/dev/null | wc -l || echo 0",
+			);
+			const windowCount = parseInt(wmctrl.trim(), 10);
+
+			// Server must be alive
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+
+			console.log(`Firefox created ${windowCount} windows`);
+		});
+
+		test("GIMP starts without crashing the server", async ({
 			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
+		}) => {
+			test.setTimeout(60_000);
 
-	test("Firefox ESR starts and creates a window", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(60_000);
+			await execInSidecar(
+				sidecarContainer,
+				"timeout 20 gimp --no-interface --batch '(gimp-quit 0)' 2>&1 &",
+			);
+			await new Promise((r) => setTimeout(r, 10000));
 
-		// Start Firefox in headless-like mode with minimal UI
-		await execInSidecar(
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
+
+		test("GTK3 demo app launches and renders", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+
+			await execInSidecar(sidecarContainer, "timeout 10 gtk3-demo &");
+			await new Promise((r) => setTimeout(r, 5000));
+
+			// Check gtk3-demo created a window
+			const windows = await execInSidecar(
+				sidecarContainer,
+				"xdotool search --name 'GTK' 2>/dev/null | head -3 || echo NONE",
+			);
+
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+
+			console.log(`GTK3 demo windows: ${windows}`);
+		});
+
+		test("GTK4 app (gnome-text-editor) starts", async ({
 			sidecarContainer,
-			"timeout 30 firefox-esr --no-remote --new-instance about:blank &",
-		);
-		await new Promise((r) => setTimeout(r, 15000));
+		}) => {
+			test.setTimeout(30_000);
 
-		// Firefox should have created at least one window
-		const wmctrl = await execInSidecar(
+			await execInSidecar(sidecarContainer, "timeout 10 gnome-text-editor &");
+			await new Promise((r) => setTimeout(r, 5000));
+
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
+
+		test("Qt5 app (qterminal) starts", async ({ sidecarContainer }) => {
+			test.setTimeout(30_000);
+
+			await execInSidecar(sidecarContainer, "timeout 10 qterminal &");
+			await new Promise((r) => setTimeout(r, 5000));
+
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
+
+		test("Tk/Tcl app (wish) starts and renders", async ({
 			sidecarContainer,
-			"xdotool search --name '' 2>/dev/null | wc -l || echo 0",
-		);
-		const windowCount = parseInt(wmctrl.trim(), 10);
+		}) => {
+			test.setTimeout(30_000);
 
-		// Server must be alive
-		const alive = await execInSidecar(
+			await execInSidecar(
+				sidecarContainer,
+				`wish -e 'wm title . "TkTest"; after 3000 exit' &`,
+			);
+			await new Promise((r) => setTimeout(r, 4000));
+
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
+
+		test("LibreOffice Writer starts without crashing", async ({
 			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
+		}) => {
+			test.setTimeout(60_000);
 
-		console.log(`Firefox created ${windowCount} windows`);
-	});
+			await execInSidecar(
+				sidecarContainer,
+				"timeout 30 soffice --writer --norestore --nofirststartwizard 2>&1 &",
+			);
+			await new Promise((r) => setTimeout(r, 15000));
 
-	test("GIMP starts without crashing the server", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(60_000);
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
 
-		await execInSidecar(
+		test("gnome-calculator starts and creates a window", async ({
 			sidecarContainer,
-			"timeout 20 gimp --no-interface --batch '(gimp-quit 0)' 2>&1 &",
-		);
-		await new Promise((r) => setTimeout(r, 10000));
+		}) => {
+			test.setTimeout(30_000);
 
-		const alive = await execInSidecar(
+			await execInSidecar(sidecarContainer, "timeout 10 gnome-calculator &");
+			await new Promise((r) => setTimeout(r, 5000));
+
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
+
+		test("zenity dialog creates and destroys cleanly", async ({
 			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
+		}) => {
+			test.setTimeout(15_000);
 
-	test("GTK3 demo app launches and renders", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(30_000);
+			await execInSidecar(
+				sidecarContainer,
+				"timeout 5 zenity --info --text='test' --timeout=2 2>/dev/null &",
+			);
+			await new Promise((r) => setTimeout(r, 4000));
 
-		await execInSidecar(sidecarContainer, "timeout 10 gtk3-demo &");
-		await new Promise((r) => setTimeout(r, 5000));
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
 
-		// Check gtk3-demo created a window
-		const windows = await execInSidecar(
+		test("imagemagick display starts without crashing", async ({
 			sidecarContainer,
-			"xdotool search --name 'GTK' 2>/dev/null | head -3 || echo NONE",
-		);
+		}) => {
+			test.setTimeout(15_000);
 
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
+			// Create a test image and try to display it
+			await execInSidecar(
+				sidecarContainer,
+				"convert -size 100x100 xc:red /tmp/test_img.png 2>/dev/null && timeout 3 display /tmp/test_img.png &",
+			);
+			await new Promise((r) => setTimeout(r, 4000));
 
-		console.log(`GTK3 demo windows: ${windows}`);
-	});
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
 
-	test("GTK4 app (gnome-text-editor) starts", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(30_000);
+		// 18 sub-benchmarks at `-time 1` each plus default 5 repetitions
+		// can run up to ~5 minutes on the software pipeline; bump the test
+		// timeout to keep this from flaking on slow CI workers.
+		test("x11perf extended operations suite", async ({ sidecarContainer }) => {
+			test.setTimeout(600_000);
 
-		await execInSidecar(
-			sidecarContainer,
-			"timeout 10 gnome-text-editor &",
-		);
-		await new Promise((r) => setTimeout(r, 5000));
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
-
-	test("Qt5 app (qterminal) starts", async ({ sidecarContainer }) => {
-		test.setTimeout(30_000);
-
-		await execInSidecar(sidecarContainer, "timeout 10 qterminal &");
-		await new Promise((r) => setTimeout(r, 5000));
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
-
-	test("Tk/Tcl app (wish) starts and renders", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(30_000);
-
-		await execInSidecar(
-			sidecarContainer,
-			`wish -e 'wm title . "TkTest"; after 3000 exit' &`,
-		);
-		await new Promise((r) => setTimeout(r, 4000));
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
-
-	test("LibreOffice Writer starts without crashing", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(60_000);
-
-		await execInSidecar(
-			sidecarContainer,
-			"timeout 30 soffice --writer --norestore --nofirststartwizard 2>&1 &",
-		);
-		await new Promise((r) => setTimeout(r, 15000));
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
-
-	test("gnome-calculator starts and creates a window", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(30_000);
-
-		await execInSidecar(sidecarContainer, "timeout 10 gnome-calculator &");
-		await new Promise((r) => setTimeout(r, 5000));
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
-
-	test("zenity dialog creates and destroys cleanly", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(15_000);
-
-		await execInSidecar(
-			sidecarContainer,
-			"timeout 5 zenity --info --text='test' --timeout=2 2>/dev/null &",
-		);
-		await new Promise((r) => setTimeout(r, 4000));
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
-
-	test("imagemagick display starts without crashing", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(15_000);
-
-		// Create a test image and try to display it
-		await execInSidecar(
-			sidecarContainer,
-			"convert -size 100x100 xc:red /tmp/test_img.png 2>/dev/null && timeout 3 display /tmp/test_img.png &",
-		);
-		await new Promise((r) => setTimeout(r, 4000));
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
-
-	// 18 sub-benchmarks at `-time 1` each plus default 5 repetitions
-	// can run up to ~5 minutes on the software pipeline; bump the test
-	// timeout to keep this from flaking on slow CI workers.
-	test("x11perf extended operations suite", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(600_000);
-
-		// Run a comprehensive x11perf test covering all major operations
-		const output = await execInSidecar(
-			sidecarContainer,
-			// Use flags confirmed by `x11perf -help`. Earlier
-			// iterations had `-text` / `-rrect{N}` / `-ptext10`,
-			// none of which are present in the help output of the
-			// version shipped in the sidecar image. The flag set
-			// below mirrors the working `x11perf window operations`
-			// test plus a representative drawing workload.
-			`x11perf -repeat 1 -time 1 \
+			// Run a comprehensive x11perf test covering all major operations
+			const output = await execInSidecar(
+				sidecarContainer,
+				// Use flags confirmed by `x11perf -help`. Earlier
+				// iterations had `-text` / `-rrect{N}` / `-ptext10`,
+				// none of which are present in the help output of the
+				// version shipped in the sidecar image. The flag set
+				// below mirrors the working `x11perf window operations`
+				// test plus a representative drawing workload.
+				`x11perf -repeat 1 -time 1 \
 				-rect500 -srect500 \
 				-line500 -seg500 -hseg500 -vseg500 \
 				-dot -putimage500 -getimage500 \
@@ -439,66 +462,70 @@ test.describe.serial("Real-world application smoke tests", () => {
 				-copywinpix500 -copypixwin500 \
 				-noop -atom \
 				2>&1 | head -200`,
-		);
+			);
 
-		expect(output).not.toContain("X Error");
-		expect(output).not.toContain("Segmentation fault");
-		// Should produce operation rate results
-		expect(output).toMatch(/reps|trep/i);
+			expect(output).not.toContain("X Error");
+			expect(output).not.toContain("Segmentation fault");
+			// Should produce operation rate results
+			expect(output).toMatch(/reps|trep/i);
+		});
+
+		test("glmark2 runs OpenGL benchmarks without crashing", async ({
+			sidecarContainer,
+		}) => {
+			test.setTimeout(60_000);
+
+			const output = await execInSidecar(
+				sidecarContainer,
+				"timeout 20 glmark2 --off-screen -b build -b texture -b shading 2>&1 || true",
+			);
+
+			expect(output).not.toContain("Segmentation fault");
+
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+
+			console.log("glmark2 output:", output.substring(0, 500));
+		});
+
+		test("multiple apps simultaneously (xterm + xeyes + xclock)", async ({
+			sidecarContainer,
+		}) => {
+			test.setTimeout(30_000);
+
+			await execInSidecar(sidecarContainer, "xterm -e 'sleep 10' &");
+			await execInSidecar(sidecarContainer, "xeyes &");
+			await execInSidecar(sidecarContainer, "xclock &");
+			await new Promise((r) => setTimeout(r, 5000));
+
+			// All three should be running
+			const ps = await execInSidecar(
+				sidecarContainer,
+				"pgrep -c 'xterm|xeyes|xclock' || echo 0",
+			);
+			const count = parseInt(ps.trim(), 10);
+			expect(count).toBeGreaterThanOrEqual(2);
+
+			const alive = await execInSidecar(
+				sidecarContainer,
+				"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
+			);
+			expect(alive).toContain("alive");
+		});
 	});
-
-	test("glmark2 runs OpenGL benchmarks without crashing", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(60_000);
-
-		const output = await execInSidecar(
-			sidecarContainer,
-			"timeout 20 glmark2 --off-screen -b build -b texture -b shading 2>&1 || true",
-		);
-
-		expect(output).not.toContain("Segmentation fault");
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-
-		console.log("glmark2 output:", output.substring(0, 500));
-	});
-
-	test("multiple apps simultaneously (xterm + xeyes + xclock)", async ({
-		sidecarContainer,
-	}) => {
-		test.setTimeout(30_000);
-
-		await execInSidecar(sidecarContainer, "xterm -e 'sleep 10' &");
-		await execInSidecar(sidecarContainer, "xeyes &");
-		await execInSidecar(sidecarContainer, "xclock &");
-		await new Promise((r) => setTimeout(r, 5000));
-
-		// All three should be running
-		const ps = await execInSidecar(
-			sidecarContainer,
-			"pgrep -c 'xterm|xeyes|xclock' || echo 0",
-		);
-		const count = parseInt(ps.trim(), 10);
-		expect(count).toBeGreaterThanOrEqual(2);
-
-		const alive = await execInSidecar(
-			sidecarContainer,
-			"xdpyinfo >/dev/null 2>&1 && echo alive || echo dead",
-		);
-		expect(alive).toContain("alive");
-	});
-});
 
 test.describe("spec compliance: advanced protocol features", () => {
-	test("FillPoly: EvenOdd vs Winding fill rules", async ({ sidecarContainer }) => {
+	test("FillPoly: EvenOdd vs Winding fill rules", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", `
+			"python3",
+			"-c",
+			`
 import Xlib.display, Xlib.X
 import sys
 
@@ -566,10 +593,14 @@ sys.exit(1 if failed > 0 else 0)
 		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(4);
 	});
 
-	test("PutImage: XYBitmap format with foreground/background", async ({ sidecarContainer }) => {
+	test("PutImage: XYBitmap format with foreground/background", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", `
+			"python3",
+			"-c",
+			`
 import Xlib.display, Xlib.X
 import struct, sys
 
@@ -632,10 +663,14 @@ sys.exit(1 if failed > 0 else 0)
 		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
 	});
 
-	test("EnterNotify/LeaveNotify crossing events", async ({ sidecarContainer }) => {
+	test("EnterNotify/LeaveNotify crossing events", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", `
+			"python3",
+			"-c",
+			`
 import Xlib.display, Xlib.X
 import sys
 
@@ -720,10 +755,14 @@ sys.exit(1 if failed > 0 else 0)
 		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
 	});
 
-	test("FocusIn/FocusOut events on SetInputFocus", async ({ sidecarContainer }) => {
+	test("FocusIn/FocusOut events on SetInputFocus", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", `
+			"python3",
+			"-c",
+			`
 import Xlib.display, Xlib.X
 import sys
 
@@ -829,7 +868,9 @@ sys.exit(1 if failed > 0 else 0)
 	test("SubstructureNotify event delivery", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", `
+			"python3",
+			"-c",
+			`
 import Xlib.display, Xlib.X
 import sys
 
@@ -950,10 +991,14 @@ sys.exit(1 if failed > 0 else 0)
 		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(5);
 	});
 
-	test("Expose event on ClearArea with exposures=true", async ({ sidecarContainer }) => {
+	test("Expose event on ClearArea with exposures=true", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", `
+			"python3",
+			"-c",
+			`
 import Xlib.display, Xlib.X
 import sys, time
 
@@ -1026,10 +1071,14 @@ sys.exit(1 if failed > 0 else 0)
 		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(2);
 	});
 
-	test("GetImage XYPixmap format with plane_mask", async ({ sidecarContainer }) => {
+	test("GetImage XYPixmap format with plane_mask", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", `
+			"python3",
+			"-c",
+			`
 import Xlib.display, Xlib.X
 import sys
 
@@ -1090,19 +1139,28 @@ sys.exit(1 if failed > 0 else 0)
 		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(3);
 	});
 
-	test("EWMH: _NET_WM_ALLOWED_ACTIONS set on mapped windows", async ({ sidecarContainer }) => {
+	test("EWMH: _NET_WM_ALLOWED_ACTIONS set on mapped windows", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "ewmh_net_wm_allowed_actions.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"ewmh_net_wm_allowed_actions.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		const match = result.output.match(/ewmh_suite: pass=(\d+) fail=(\d+)/);
 		expect(match).toBeTruthy();
 		expect(Number.parseInt(match![2], 10)).toBe(0);
 		expect(Number.parseInt(match![1], 10)).toBeGreaterThanOrEqual(5);
 	});
 
-	test("GLX: glxinfo reports contexts and visual configs", async ({ sidecarContainer }) => {
+	test("GLX: glxinfo reports contexts and visual configs", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(60_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c",
+			"bash",
+			"-c",
 			"DISPLAY=:99 glxinfo 2>&1 | head -50",
 		]);
 		// GLX should at least report version info
@@ -1110,10 +1168,14 @@ sys.exit(1 if failed > 0 else 0)
 		console.log(`glxinfo first 50 lines captured`);
 	});
 
-	test("comprehensive x11perf wide lines and stipple fills", async ({ sidecarContainer }) => {
+	test("comprehensive x11perf wide lines and stipple fills", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(600_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				// x11perf flag names: -srect/-osrect are stippled/opaque-
 				// stippled rectangles. There are no -stiprect/-ostiprect
@@ -1138,94 +1200,102 @@ sys.exit(1 if failed > 0 else 0)
 	});
 });
 
-test.describe.serial("GLX and OpenGL", () => {
-	test.setTimeout(120_000);
+test.describe
+	.serial("GLX and OpenGL", () => {
+		test.setTimeout(120_000);
 
-	test("glxinfo works with DRISW software rendering", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+		test("glxinfo works with DRISW software rendering", async ({
 			sidecarContainer,
-			"LIBGL_DEBUG=verbose timeout 10 glxinfo -B 2>&1 | head -30",
-		);
-		expect(output).toContain("OpenGL renderer string: llvmpipe");
-		expect(output).toContain("OpenGL version string:");
-		expect(output).not.toContain("Segmentation fault");
-		expect(output).not.toContain("[xcb] Extra reply data");
-		expect(output).not.toContain("No matching fbConfigs");
-	});
+		}) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				"LIBGL_DEBUG=verbose timeout 10 glxinfo -B 2>&1 | head -30",
+			);
+			expect(output).toContain("OpenGL renderer string: llvmpipe");
+			expect(output).toContain("OpenGL version string:");
+			expect(output).not.toContain("Segmentation fault");
+			expect(output).not.toContain("[xcb] Extra reply data");
+			expect(output).not.toContain("No matching fbConfigs");
+		});
 
-	test("glmark2 renders with DRISW software rendering", async ({
-		sidecarContainer,
-	}) => {
-		// glmark2 calls glXChooseFBConfig with specific requirements.
-		// Test what attributes it needs via a ctypes probe.
-		const probeScript = [
-			"import ctypes, ctypes.util, sys, os",
-			"os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'",
-			"X11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
-			"GL = ctypes.CDLL(ctypes.util.find_library('GL'))",
-			"X11.XOpenDisplay.restype = ctypes.c_void_p",
-			"dpy = X11.XOpenDisplay(b':99')",
-			"if not dpy: print('FAIL:display'); sys.exit(1)",
-			"GL.glXChooseFBConfig.restype = ctypes.POINTER(ctypes.c_void_p)",
-			"# glmark2-style attrs: RGBA, double-buffered, depth 24, stencil 8",
-			"attrs = (ctypes.c_int * 13)(0x8011, 1, 5, 1, 12, 24, 13, 8, 8, 8, 9, 8, 0)",
-			"n = ctypes.c_int()",
-			"cfgs = GL.glXChooseFBConfig(dpy, 0, attrs, ctypes.byref(n))",
-			"print(f'ChooseFBConfig={n.value}')",
-			"# Simpler: just double-buffer",
-			"attrs2 = (ctypes.c_int * 3)(5, 1, 0)",
-			"cfgs2 = GL.glXChooseFBConfig(dpy, 0, attrs2, ctypes.byref(n))",
-			"print(f'SimpleChoose={n.value}')",
-			"# Even simpler: no attrs at all",
-			"attrs3 = (ctypes.c_int * 1)(0)",
-			"cfgs3 = GL.glXChooseFBConfig(dpy, 0, attrs3, ctypes.byref(n))",
-			"print(f'AnyConfig={n.value}')",
-			"# Test glXGetVisualFromFBConfig — glmark2 needs this",
-			"if cfgs and n.value > 0:",
-			"    GL.glXGetVisualFromFBConfig.restype = ctypes.c_void_p",
-			"    for i in range(min(n.value, 4)):",
-			"        vi = GL.glXGetVisualFromFBConfig(dpy, cfgs[i])",
-			"        print(f'  FBConfig[{i}] visual={hex(vi) if vi else \"NULL\"}')",
-			"X11.XCloseDisplay(dpy)",
-		].join("\n");
-		const b64 = Buffer.from(probeScript).toString("base64");
-		await sidecarContainer.exec(["bash", "-c", `printf '%s' '${b64}' | base64 -d > /tmp/glmark2_probe.py`]);
-		const probeOutput = await execInSidecar(sidecarContainer, "python3 /tmp/glmark2_probe.py 2>&1");
-		console.log("FBConfig probe:", probeOutput);
-
-		// Run glmark2
-		const output = await execInSidecar(
+		test("glmark2 renders with DRISW software rendering", async ({
 			sidecarContainer,
-			"LIBGL_DEBUG=verbose timeout 10 glmark2 -b build 2>&1 | head -20 || true",
-		);
-		console.log("glmark2 output:", output);
-		expect(output).not.toContain("Segmentation fault");
-	});
+		}) => {
+			// glmark2 calls glXChooseFBConfig with specific requirements.
+			// Test what attributes it needs via a ctypes probe.
+			const probeScript = [
+				"import ctypes, ctypes.util, sys, os",
+				"os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'",
+				"X11 = ctypes.CDLL(ctypes.util.find_library('X11'))",
+				"GL = ctypes.CDLL(ctypes.util.find_library('GL'))",
+				"X11.XOpenDisplay.restype = ctypes.c_void_p",
+				"dpy = X11.XOpenDisplay(b':99')",
+				"if not dpy: print('FAIL:display'); sys.exit(1)",
+				"GL.glXChooseFBConfig.restype = ctypes.POINTER(ctypes.c_void_p)",
+				"# glmark2-style attrs: RGBA, double-buffered, depth 24, stencil 8",
+				"attrs = (ctypes.c_int * 13)(0x8011, 1, 5, 1, 12, 24, 13, 8, 8, 8, 9, 8, 0)",
+				"n = ctypes.c_int()",
+				"cfgs = GL.glXChooseFBConfig(dpy, 0, attrs, ctypes.byref(n))",
+				"print(f'ChooseFBConfig={n.value}')",
+				"# Simpler: just double-buffer",
+				"attrs2 = (ctypes.c_int * 3)(5, 1, 0)",
+				"cfgs2 = GL.glXChooseFBConfig(dpy, 0, attrs2, ctypes.byref(n))",
+				"print(f'SimpleChoose={n.value}')",
+				"# Even simpler: no attrs at all",
+				"attrs3 = (ctypes.c_int * 1)(0)",
+				"cfgs3 = GL.glXChooseFBConfig(dpy, 0, attrs3, ctypes.byref(n))",
+				"print(f'AnyConfig={n.value}')",
+				"# Test glXGetVisualFromFBConfig — glmark2 needs this",
+				"if cfgs and n.value > 0:",
+				"    GL.glXGetVisualFromFBConfig.restype = ctypes.c_void_p",
+				"    for i in range(min(n.value, 4)):",
+				"        vi = GL.glXGetVisualFromFBConfig(dpy, cfgs[i])",
+				"        print(f'  FBConfig[{i}] visual={hex(vi) if vi else \"NULL\"}')",
+				"X11.XCloseDisplay(dpy)",
+			].join("\n");
+			const b64 = Buffer.from(probeScript).toString("base64");
+			await sidecarContainer.exec([
+				"bash",
+				"-c",
+				`printf '%s' '${b64}' | base64 -d > /tmp/glmark2_probe.py`,
+			]);
+			const probeOutput = await execInSidecar(
+				sidecarContainer,
+				"python3 /tmp/glmark2_probe.py 2>&1",
+			);
+			console.log("FBConfig probe:", probeOutput);
 
-	test("glxinfo reports GLX version and extensions", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
-			sidecarContainer,
-			"LIBGL_ALWAYS_INDIRECT=1 glxinfo 2>&1 | head -30",
-		);
-		expect(output).toContain("server glx version string: 1.4");
-		expect(output).toContain("server glx vendor string: x11-web OSMesa");
-		expect(output).not.toContain("[xcb] Extra reply data");
-		expect(output).not.toContain("Segmentation fault");
-	});
+			// Run glmark2
+			const output = await execInSidecar(
+				sidecarContainer,
+				"LIBGL_DEBUG=verbose timeout 10 glmark2 -b build 2>&1 | head -20 || true",
+			);
+			console.log("glmark2 output:", output);
+			expect(output).not.toContain("Segmentation fault");
+		});
 
-	test("glxgears renders frames without crash (indirect)", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+		test("glxinfo reports GLX version and extensions", async ({
 			sidecarContainer,
-			"LIBGL_ALWAYS_INDIRECT=1 timeout 2 glxgears -info 2>&1 | head -20 || true",
-		);
-		expect(output).not.toContain("glXCreateContext failed");
-		expect(output).not.toContain("Segmentation fault");
-		expect(output).not.toContain("[xcb] Extra reply data");
+		}) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				"LIBGL_ALWAYS_INDIRECT=1 glxinfo 2>&1 | head -30",
+			);
+			expect(output).toContain("server glx version string: 1.4");
+			expect(output).toContain("server glx vendor string: x11-web OSMesa");
+			expect(output).not.toContain("[xcb] Extra reply data");
+			expect(output).not.toContain("Segmentation fault");
+		});
+
+		test("glxgears renders frames without crash (indirect)", async ({
+			sidecarContainer,
+		}) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				"LIBGL_ALWAYS_INDIRECT=1 timeout 2 glxgears -info 2>&1 | head -20 || true",
+			);
+			expect(output).not.toContain("glXCreateContext failed");
+			expect(output).not.toContain("Segmentation fault");
+			expect(output).not.toContain("[xcb] Extra reply data");
+		});
 	});
-});

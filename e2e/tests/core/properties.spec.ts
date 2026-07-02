@@ -5,43 +5,64 @@
 
 import { test, expect, runPythonScript } from "../fixtures";
 
-test.describe.serial("Event delivery edge cases", () => {
-	test("PropertyNotify events delivered on property changes", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "propertynotify_events_delivered_on_property_changes.py", { env: { DISPLAY: ":99" } })).output.trim();
-		// Should have at least 1 PropertyNotify
-		const count = Number.parseInt(
-			output.match(/property_notify_count=(\d+)/)?.[1] ?? "0",
-		);
-		expect(count).toBeGreaterThanOrEqual(1);
-	});
+test.describe
+	.serial("Event delivery edge cases", () => {
+		test("PropertyNotify events delivered on property changes", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"propertynotify_events_delivered_on_property_changes.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			// Should have at least 1 PropertyNotify
+			const count = Number.parseInt(
+				output.match(/property_notify_count=(\d+)/)?.[1] ?? "0",
+			);
+			expect(count).toBeGreaterThanOrEqual(1);
+		});
 
-	test("SubstructureRedirectMask generates ConfigureRequest", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "substructureredirectmask_generates_configurerequest.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("got_map_request=True");
-	});
+		test("SubstructureRedirectMask generates ConfigureRequest", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"substructureredirectmask_generates_configurerequest.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("got_map_request=True");
+		});
 
-	test("Focus revert to parent on destroy", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "focus_revert_to_parent_on_destroy.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("focus_before=");
-		// Focus should revert to parent (or root if parent got cleaned up)
+		test("Focus revert to parent on destroy", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"focus_revert_to_parent_on_destroy.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("focus_before=");
+			// Focus should revert to parent (or root if parent got cleaned up)
+		});
 	});
-});
 
 test.describe("Protocol compliance: xprop", () => {
-	test("xprop can set and retrieve a custom property", async ({ sidecarContainer }) => {
+	test("xprop can set and retrieve a custom property", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"# Get root window ID",
 				"ROOT=$(xdpyinfo 2>/dev/null | grep 'root window id:' | awk '{print $NF}')",
-				"if [ -z \"$ROOT\" ]; then ROOT=0x1; fi",
+				'if [ -z "$ROOT" ]; then ROOT=0x1; fi',
 				"# Set a custom property on root",
 				"xprop -root -f _X11WEB_TEST 8s -set _X11WEB_TEST 'hello_from_e2e' 2>&1",
 				"# Read it back",
@@ -60,10 +81,14 @@ test.describe("Protocol compliance: xprop", () => {
 });
 
 test.describe("Property operations", () => {
-	test("ChangeProperty + GetProperty + RotateProperties", async ({ sidecarContainer }) => {
+	test("ChangeProperty + GetProperty + RotateProperties", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display, Xlib.X, Xlib.Xatom",
 				"d = Xlib.display.Display()",
 				"screen = d.screen()",
@@ -109,17 +134,29 @@ test.describe("Property operations", () => {
 });
 
 test.describe("Orphan: python3-xlib smoke tests", () => {
-	test("python3-xlib can connect and query the server", async ({ sidecarContainer }) => {
+	test("python3-xlib can connect and query the server", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "python_xlib_connect_query.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"python_xlib_connect_query.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`python-xlib: ${result.output.trim()}`);
 		expect(result.output).toContain("PYTHON_XLIB_OK");
 		expect(result.output).toContain("1024x768");
 	});
 
-	test("python3-xlib can create and destroy windows", async ({ sidecarContainer }) => {
+	test("python3-xlib can create and destroy windows", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "python_xlib_window_lifecycle.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"python_xlib_window_lifecycle.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`python-xlib window: ${result.output.trim()}`);
 		expect(result.output).toContain("WINDOW_LIFECYCLE_OK");
 		expect(result.output).toContain("100x100");
@@ -127,7 +164,11 @@ test.describe("Orphan: python3-xlib smoke tests", () => {
 
 	test("python3-xlib can get/set properties", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "python_xlib_get_set_properties.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"python_xlib_get_set_properties.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`python-xlib property: ${result.output.trim()}`);
 		expect(result.output).toContain("PROPERTY_OK");
 		expect(result.output).toContain("hello world");
@@ -135,7 +176,11 @@ test.describe("Orphan: python3-xlib smoke tests", () => {
 
 	test("python3-xlib can query extensions", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "python_xlib_query_extensions.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"python_xlib_query_extensions.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`python-xlib extensions: exit=${result.exitCode}`);
 		expect(result.output).toContain("EXTENSIONS_OK");
 	});

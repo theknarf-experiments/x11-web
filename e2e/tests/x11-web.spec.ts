@@ -463,12 +463,20 @@ test("keyboard input follows canvas focus between windows", async ({
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
-	const win1 = await spawnApp(page, "-fn fixed -geometry 40x10+10+10 -e bash", "xterm");
+	const win1 = await spawnApp(
+		page,
+		"-fn fixed -geometry 40x10+10+10 -e bash",
+		"xterm",
+	);
 	const canvas1 = win1.locator('[data-testid="x11-canvas"]');
 	await expect(canvas1).toBeVisible();
 	await page.waitForTimeout(5000);
 
-	const win2 = await spawnApp(page, "-fn fixed -geometry 40x10+400+10 -e bash", "xterm");
+	const win2 = await spawnApp(
+		page,
+		"-fn fixed -geometry 40x10+400+10 -e bash",
+		"xterm",
+	);
 	const canvas2 = win2.locator('[data-testid="x11-canvas"]');
 	await expect(canvas2).toBeVisible();
 	await page.waitForTimeout(5000);
@@ -590,7 +598,10 @@ test("xterm accepts keyboard input", async ({ page, frontendUrl }) => {
 // on its WebRTC reconnection — window-frame stays empty. Likely needs the
 // frontend to seed itself from the server's _NET_CLIENT_LIST on connect.
 // Skipping until the reconnect-rehydration story is fleshed out.
-test.skip("window content survives page refresh", async ({ page, frontendUrl }) => {
+test.skip("window content survives page refresh", async ({
+	page,
+	frontendUrl,
+}) => {
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
@@ -1809,7 +1820,9 @@ test("xrandr --query enumerates the RandR screen", async ({
 	expect(result.exitCode).toBe(0);
 	expect(result.output).toMatch(/Screen 0:.*1024 x 768/);
 	// "default connected (primary)? 1024x768+0+0" — the RandR output line.
-	expect(result.output).toMatch(/default\s+connected\s+(?:primary\s+)?1024x768/);
+	expect(result.output).toMatch(
+		/default\s+connected\s+(?:primary\s+)?1024x768/,
+	);
 	// And the mode list should contain the same resolution.
 	expect(result.output).toMatch(/1024x768\s/);
 });
@@ -3364,7 +3377,9 @@ test("Xts: drawing primitives", async ({ sidecarContainer }) => {
 // hangs or returns useless statuses. We exercise the same protocol
 // surface via the focused "Xts: …" tests above, which are byte-level
 // asserts the X server passes today.
-test.skip("Xts: built test binaries from xts-src", async ({ sidecarContainer }) => {
+test.skip("Xts: built test binaries from xts-src", async ({
+	sidecarContainer,
+}) => {
 	test.setTimeout(120_000);
 	// Run any TET-based Xts test binaries that were successfully
 	// compiled during the Docker build. The build is best-effort

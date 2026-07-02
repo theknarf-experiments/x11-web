@@ -73,9 +73,7 @@ describe("Reassembler.onChunk", () => {
 		// Open a partial at msg_id 5 — never completes.
 		r.onChunk(chunk(5, 0, 3, [1]));
 		// A newer message arrives complete — should assemble normally.
-		expect(r.onChunk(chunk(10, 0, 1, [0x42]))).toEqual(
-			new Uint8Array([0x42]),
-		);
+		expect(r.onChunk(chunk(10, 0, 1, [0x42]))).toEqual(new Uint8Array([0x42]));
 		// Late chunk for msg 5 is now stale and dropped.
 		expect(r.onChunk(chunk(5, 1, 3, [2]))).toBeNull();
 		expect(r.onChunk(chunk(5, 2, 3, [3]))).toBeNull();
@@ -111,9 +109,7 @@ describe("Reassembler.onChunk", () => {
 		// Seed `latestSeen` near the u32 ceiling.
 		r.onChunk(chunk(0xfffffffe, 0, 1, [0x10]));
 		// A wrap-around msg_id of 0 must be treated as newer.
-		expect(r.onChunk(chunk(0, 0, 1, [0x20]))).toEqual(
-			new Uint8Array([0x20]),
-		);
+		expect(r.onChunk(chunk(0, 0, 1, [0x20]))).toEqual(new Uint8Array([0x20]));
 		// And a chunk for the now-stale older id should be dropped.
 		expect(r.onChunk(chunk(0xfffffffd, 0, 1, [0x30]))).toBeNull();
 	});

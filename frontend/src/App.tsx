@@ -161,12 +161,7 @@ function App() {
 
 	// OIDC auth state — `null` user means anonymous (everything
 	// still works; identity-gated features just stay locked).
-	const {
-		user: authUser,
-		loading: authLoading,
-		signIn,
-		signOut,
-	} = useAuth();
+	const { user: authUser, loading: authLoading, signIn, signOut } = useAuth();
 
 	/** Active canvas tool — "pointer" (default), "box", or "arrow".
 	 *  Hotkeys (V / B / A) registered below. */
@@ -438,11 +433,7 @@ function App() {
 			// frame, regardless of stroke length.
 			const cur = drawingRef.current;
 			if (cur?.kind === "pen") {
-				const sample: [number, number, number] = [
-					p.x,
-					p.y,
-					ev.pressure || 0.5,
-				];
+				const sample: [number, number, number] = [p.x, p.y, ev.pressure || 0.5];
 				const newPoints = [...cur.points, sample];
 				let nodeId = cur.nodeId;
 				if (!nodeId && newPoints.length >= 2) {
@@ -677,9 +668,7 @@ function App() {
 				const overAttachable = document
 					.elementsFromPoint(ev.clientX, ev.clientY)
 					.map((el) =>
-						(el as Element).closest<HTMLElement>(
-							"[data-ocif-attachable]",
-						),
+						(el as Element).closest<HTMLElement>("[data-ocif-attachable]"),
 					)
 					.find((el): el is HTMLElement => !!el);
 				const overNodeId = overAttachable?.dataset.ocifAttachable ?? null;
@@ -793,10 +782,8 @@ function App() {
 			const node = ocifNodes.get(id);
 			if (!node || node.rect || node.arrow) return;
 			const wid = activeWorkspace.id;
-			const signX: 1 | -1 =
-				corner === "ne" || corner === "se" ? 1 : -1;
-			const signY: 1 | -1 =
-				corner === "se" || corner === "sw" ? 1 : -1;
+			const signX: 1 | -1 = corner === "ne" || corner === "se" ? 1 : -1;
+			const signY: 1 | -1 = corner === "se" || corner === "sw" ? 1 : -1;
 			// Anchor = the corner OPPOSITE the one being dragged.
 			// Stays fixed in canvas coords across the gesture so
 			// the drag doesn't drift the node.
@@ -1100,9 +1087,7 @@ function App() {
 								selected={selectedNodeId === id}
 								interactive={tool === "pointer"}
 								nodes={ocifNodes}
-								draggingEnd={
-									arrowDrag?.arrowId === id ? arrowDrag.end : null
-								}
+								draggingEnd={arrowDrag?.arrowId === id ? arrowDrag.end : null}
 								onPointerDown={handleNodePointerDown}
 								onEndpointPointerDown={handleArrowEndpointDown}
 							/>
@@ -1189,8 +1174,12 @@ function App() {
 						}}
 					>
 						<line
-							x1={drawing.startX - (Math.min(drawing.startX, drawing.endX) - 24)}
-							y1={drawing.startY - (Math.min(drawing.startY, drawing.endY) - 24)}
+							x1={
+								drawing.startX - (Math.min(drawing.startX, drawing.endX) - 24)
+							}
+							y1={
+								drawing.startY - (Math.min(drawing.startY, drawing.endY) - 24)
+							}
 							x2={drawing.endX - (Math.min(drawing.startX, drawing.endX) - 24)}
 							y2={drawing.endY - (Math.min(drawing.startY, drawing.endY) - 24)}
 							stroke="#007aff"

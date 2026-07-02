@@ -10,9 +10,10 @@ export interface Config {
 }
 
 export function configFromEnv(): Config {
-	const endpoint = (
-		process.env.O2_ENDPOINT ?? "http://localhost:5080"
-	).replace(/\/+$/, "");
+	const endpoint = (process.env.O2_ENDPOINT ?? "http://localhost:5080").replace(
+		/\/+$/,
+		"",
+	);
 	const org = process.env.O2_ORG ?? "default";
 	const email = process.env.O2_EMAIL ?? "admin@admin.com";
 	const password = process.env.O2_PASSWORD ?? "admin";
@@ -84,7 +85,10 @@ export class O2Client {
 	 *  schema lazily as data arrives — fields only exist after
 	 *  something has populated them, which is easy to forget when
 	 *  writing SQL. */
-	async getStreamSchema(name: string, streamType: StreamType): Promise<Field[]> {
+	async getStreamSchema(
+		name: string,
+		streamType: StreamType,
+	): Promise<Field[]> {
 		const raw = await this.request(
 			"GET",
 			`/api/${this.cfg.org}/streams/${encodeURIComponent(name)}/schema?type=${streamType}`,
@@ -129,7 +133,9 @@ export function parseDuration(s: string): number {
 		throw new Error(`bad duration "${s}" (expected e.g. 30s, 5m, 1h, 2d)`);
 	}
 	const n = Number(m[1]);
-	const factor = { s: 1, m: 60, h: 3600, d: 86400 }[m[2] as "s" | "m" | "h" | "d"];
+	const factor = { s: 1, m: 60, h: 3600, d: 86400 }[
+		m[2] as "s" | "m" | "h" | "d"
+	];
 	return n * factor * 1_000_000; // µs
 }
 

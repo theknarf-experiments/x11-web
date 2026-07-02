@@ -64,9 +64,7 @@ export function OcifArrow({
 	const layout = useMemo(() => {
 		const arrow = node.arrow;
 		if (!arrow) return null;
-		const startNode = node.edge?.start
-			? nodes.get(node.edge.start)
-			: undefined;
+		const startNode = node.edge?.start ? nodes.get(node.edge.start) : undefined;
 		const endNode = node.edge?.end ? nodes.get(node.edge.end) : undefined;
 		// Determine effective bounding box per endpoint. Free
 		// endpoints become 1×1 point boxes at the cached coord.

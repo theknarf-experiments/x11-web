@@ -6,10 +6,14 @@
 import { test, expect } from "../fixtures";
 
 test.describe("App compatibility: xterm real interaction", () => {
-	test("xterm receives XTEST key injection and text appears", async ({ sidecarContainer }) => {
+	test("xterm receives XTEST key injection and text appears", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(60_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"# Start xterm running cat to capture typed text",
 				"rm -f /tmp/xterm-capture.txt",
@@ -18,10 +22,10 @@ test.describe("App compatibility: xterm real interaction", () => {
 				"sleep 3",
 				"# Find xterm window and focus it",
 				"WID=$(xdotool search --name 'xterm' 2>/dev/null | head -1)",
-				"if [ -z \"$WID\" ]; then",
+				'if [ -z "$WID" ]; then',
 				"  WID=$(xdotool search --class 'XTerm' 2>/dev/null | head -1)",
 				"fi",
-				"if [ -z \"$WID\" ]; then",
+				'if [ -z "$WID" ]; then',
 				"  echo 'FAIL: xterm window not found'",
 				"  kill $XTERM_PID 2>/dev/null; exit 0",
 				"fi",

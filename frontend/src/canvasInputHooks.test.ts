@@ -97,14 +97,14 @@ describe("wheelAccumulate", () => {
 	test("horizontal scroll uses buttons 6/7", () => {
 		// Right (positive X) → 7
 		const right = wheelAccumulate(stateAt(0, 0), 20, 0, 0, 0, 0);
-		expect(
-			right.events.find((e) => e.kind === "ButtonPress"),
-		).toMatchObject({ button: 7 });
+		expect(right.events.find((e) => e.kind === "ButtonPress")).toMatchObject({
+			button: 7,
+		});
 		// Left (negative X) → 6
 		const left = wheelAccumulate(stateAt(0, 0), -20, 0, 0, 0, 0);
-		expect(
-			left.events.find((e) => e.kind === "ButtonPress"),
-		).toMatchObject({ button: 6 });
+		expect(left.events.find((e) => e.kind === "ButtonPress")).toMatchObject({
+			button: 6,
+		});
 	});
 
 	test("preserves carry across calls", () => {
@@ -257,9 +257,7 @@ describe("attachPinchGesture", () => {
 
 		const phases = captured
 			.filter((e) => e.kind === "GesturePinch")
-			.map((e) =>
-				e.kind === "GesturePinch" ? e.phase : null,
-			);
+			.map((e) => (e.kind === "GesturePinch" ? e.phase : null));
 		expect(phases).toEqual(["Begin", "Update", "End"]);
 
 		// The middle Update should report scale > 1 (fingers moved
@@ -353,8 +351,6 @@ describe("attachDndBridge", () => {
 	test("Leave fires", () => {
 		cleanup = attachDndBridge(canvas, (ev) => captured.push(ev));
 		fireDrag("dragleave", {});
-		expect(captured).toEqual([
-			{ kind: "DndBridge", event: { kind: "Leave" } },
-		]);
+		expect(captured).toEqual([{ kind: "DndBridge", event: { kind: "Leave" } }]);
 	});
 });

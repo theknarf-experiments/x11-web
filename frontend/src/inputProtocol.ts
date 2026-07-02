@@ -258,10 +258,7 @@ export function clientToCanvas(
 }
 
 /** `mousemove` in canvas space → `MotionNotify`. */
-export function mouseMoveToInput(
-	e: MouseLike,
-	g: CanvasGeometry,
-): InputEvent {
+export function mouseMoveToInput(e: MouseLike, g: CanvasGeometry): InputEvent {
 	const { x, y } = clientToCanvas(e.clientX, e.clientY, g);
 	return {
 		kind: "MotionNotify",
@@ -274,10 +271,7 @@ export function mouseMoveToInput(
 /** `mousedown` → `ButtonPress`. The browser reports `buttons` as
  *  the post-press state, so we strip the just-pressed bit before
  *  encoding the X11 state. */
-export function mouseDownToInput(
-	e: MouseLike,
-	g: CanvasGeometry,
-): InputEvent {
+export function mouseDownToInput(e: MouseLike, g: CanvasGeometry): InputEvent {
 	const { x, y } = clientToCanvas(e.clientX, e.clientY, g);
 	const prePress = e.buttons & ~buttonBitFor(e.button);
 	return {
@@ -293,10 +287,7 @@ export function mouseDownToInput(
  *  the post-release state; reconstruct the pre-release set by
  *  re-adding the just-released bit so the X11 state matches what
  *  was true at the instant of the release. */
-export function mouseUpToInput(
-	e: MouseLike,
-	g: CanvasGeometry,
-): InputEvent {
+export function mouseUpToInput(e: MouseLike, g: CanvasGeometry): InputEvent {
 	const { x, y } = clientToCanvas(e.clientX, e.clientY, g);
 	const preRelease = e.buttons | buttonBitFor(e.button);
 	return {

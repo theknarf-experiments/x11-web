@@ -62,9 +62,7 @@ export function SettingsPanel({
 				<select
 					id="focus-policy"
 					value={focusPolicy}
-					onChange={(e) =>
-						onFocusPolicyChange(e.target.value as FocusPolicy)
-					}
+					onChange={(e) => onFocusPolicyChange(e.target.value as FocusPolicy)}
 				>
 					<option value="click-to-focus">Click to focus</option>
 					<option value="focus-follows-mouse">Focus follows mouse</option>

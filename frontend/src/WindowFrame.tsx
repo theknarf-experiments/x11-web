@@ -334,9 +334,10 @@ export function WindowFrame({
 	else if (isMaximized) containerClass = `${s.window} ${s.maximized}`;
 
 	// For maximized/fullscreen, override position
-	const containerStyle: React.CSSProperties = isMaximized || isFullscreen
-		? { zIndex, background: color }
-		: { left: x, top: y, zIndex, background: color };
+	const containerStyle: React.CSSProperties =
+		isMaximized || isFullscreen
+			? { zIndex, background: color }
+			: { left: x, top: y, zIndex, background: color };
 
 	return (
 		<div

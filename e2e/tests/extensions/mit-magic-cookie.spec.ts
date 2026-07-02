@@ -6,7 +6,9 @@
 import { test, expect } from "../fixtures";
 
 test.describe("MIT-MAGIC-COOKIE-1 authentication", () => {
-	test("xauth list shows a cookie for display :99", async ({ sidecarContainer }) => {
+	test("xauth list shows a cookie for display :99", async ({
+		sidecarContainer,
+	}) => {
 		// The X server writes its auth file to a fixed path
 		// (/tmp/.x11-web-Xauthority — see X11Server::write_xauthority).
 		// `xauth` without an explicit -f / $XAUTHORITY would look at
@@ -19,7 +21,7 @@ test.describe("MIT-MAGIC-COOKIE-1 authentication", () => {
 				"export DISPLAY=:99",
 				"export XAUTHORITY=/tmp/.x11-web-Xauthority",
 				"ENTRIES=$(xauth list 2>&1 || echo 'xauth failed')",
-				"echo \"$ENTRIES\"",
+				'echo "$ENTRIES"',
 				"if echo \"$ENTRIES\" | grep -q 'MIT-MAGIC-COOKIE-1'; then",
 				"  echo 'PASS: MIT-MAGIC-COOKIE-1 entry found'",
 				"else",
@@ -30,7 +32,9 @@ test.describe("MIT-MAGIC-COOKIE-1 authentication", () => {
 		expect(result.output).toContain("PASS:");
 	});
 
-	test("connection with wrong cookie is rejected", async ({ sidecarContainer }) => {
+	test("connection with wrong cookie is rejected", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",

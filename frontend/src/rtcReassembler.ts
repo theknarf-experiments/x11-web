@@ -52,7 +52,11 @@ export class Reassembler {
 
 		let state = this.partials.get(msgId);
 		if (!state) {
-			state = { chunks: new Array(totalChunks), received: 0, total: totalChunks };
+			state = {
+				chunks: new Array(totalChunks),
+				received: 0,
+				total: totalChunks,
+			};
 			this.partials.set(msgId, state);
 		} else if (state.total !== totalChunks) {
 			// Sender disagrees with itself — drop the whole message.

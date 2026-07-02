@@ -62,11 +62,7 @@ export function OcifText({
 		},
 		[id, onPointerDown, editing, interactive],
 	);
-	const className = dropTarget
-		? s.dropTarget
-		: selected
-			? s.selected
-			: s.text;
+	const className = dropTarget ? s.dropTarget : selected ? s.selected : s.text;
 	return (
 		<div
 			data-testid="ocif-box"

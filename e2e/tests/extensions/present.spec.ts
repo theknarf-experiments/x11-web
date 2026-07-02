@@ -11,7 +11,11 @@ async function execInSidecar(
 	cmd: string,
 	_timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
+	const result = await container.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; ${cmd}`,
+	]);
 	return result.output.trim();
 }
 
@@ -25,114 +29,157 @@ async function probe(
 	return result.output.trim();
 }
 
-test.describe.serial("XInput2 extension compliance", () => {
-	test("XInput2 extension is present and reports devices", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+test.describe
+	.serial("XInput2 extension compliance", () => {
+		test("XInput2 extension is present and reports devices", async ({
 			sidecarContainer,
-			`xinput list 2>/dev/null`,
-		);
-		expect(output).toContain("Virtual core pointer");
-		expect(output).toContain("Virtual core keyboard");
-	});
+		}) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				`xinput list 2>/dev/null`,
+			);
+			expect(output).toContain("Virtual core pointer");
+			expect(output).toContain("Virtual core keyboard");
+		});
 
-	test("XInput2 device hierarchy has correct structure", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+		test("XInput2 device hierarchy has correct structure", async ({
 			sidecarContainer,
-			`xinput list --short 2>/dev/null`,
-		);
-		// XI2 spec requires virtual core pointer (id=2) and virtual core keyboard (id=3)
-		expect(output).toContain("Virtual core pointer");
-		expect(output).toContain("Virtual core keyboard");
-		// Should have slave devices attached
-		expect(output).toMatch(/id=\d+/);
-	});
+		}) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				`xinput list --short 2>/dev/null`,
+			);
+			// XI2 spec requires virtual core pointer (id=2) and virtual core keyboard (id=3)
+			expect(output).toContain("Virtual core pointer");
+			expect(output).toContain("Virtual core keyboard");
+			// Should have slave devices attached
+			expect(output).toMatch(/id=\d+/);
+		});
 
-	test("XInput2 device properties are queryable", async ({
-		sidecarContainer,
-	}) => {
-		// Query properties of the virtual core pointer
-		const output = await execInSidecar(
+		test("XInput2 device properties are queryable", async ({
 			sidecarContainer,
-			`xinput list-props 2 2>/dev/null || echo "props_failed"`,
-		);
-		// Should return device properties without errors
-		expect(output).not.toContain("props_failed");
-	});
+		}) => {
+			// Query properties of the virtual core pointer
+			const output = await execInSidecar(
+				sidecarContainer,
+				`xinput list-props 2 2>/dev/null || echo "props_failed"`,
+			);
+			// Should return device properties without errors
+			expect(output).not.toContain("props_failed");
+		});
 
-	test("XInput2 pointer query returns valid coordinates", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "xinput2_pointer_query_returns_valid_coordinates.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("pointer_query=ok");
-		expect(output).toContain("same_screen=1");
-	});
-
-	test("XInput2 grab and ungrab pointer", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "xinput2_grab_and_ungrab_pointer.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("grab_status=0"); // GrabSuccess
-		expect(output).toContain("ungrab=ok");
-	});
-
-	test("XInput2 keyboard grab and ungrab", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "xinput2_keyboard_grab_and_ungrab.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("kb_grab_status=0"); // GrabSuccess
-		expect(output).toContain("kb_ungrab=ok");
-	});
-
-	test("XInput2 passive button grab", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "xinput2_passive_button_grab.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("passive_grab=ok");
-		expect(output).toContain("passive_ungrab=ok");
-	});
-
-	test("XInput2 passive key grab", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "xinput2_passive_key_grab.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("key_grab=ok");
-		expect(output).toContain("key_ungrab=ok");
-	});
-
-	test("XInput2 warp pointer generates events", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "xinput2_warp_pointer_generates_events.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("x_after_warp=100");
-		expect(output).toContain("y_after_warp=200");
-		expect(output).toContain("warp=ok");
-	});
-});
-
-test.describe.serial("XI 1.x protocol compliance", () => {
-	test("XInput extension is present", async ({ sidecarContainer }) => {
-		const output = await execInSidecar(
+		test("XInput2 pointer query returns valid coordinates", async ({
 			sidecarContainer,
-			`xinput list 2>&1 || echo "xinput_not_available"`,
-		);
-		// xinput should not error out
-		expect(output).not.toContain("unable to open display");
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xinput2_pointer_query_returns_valid_coordinates.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("pointer_query=ok");
+			expect(output).toContain("same_screen=1");
+		});
+
+		test("XInput2 grab and ungrab pointer", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xinput2_grab_and_ungrab_pointer.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("grab_status=0"); // GrabSuccess
+			expect(output).toContain("ungrab=ok");
+		});
+
+		test("XInput2 keyboard grab and ungrab", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xinput2_keyboard_grab_and_ungrab.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("kb_grab_status=0"); // GrabSuccess
+			expect(output).toContain("kb_ungrab=ok");
+		});
+
+		test("XInput2 passive button grab", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xinput2_passive_button_grab.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("passive_grab=ok");
+			expect(output).toContain("passive_ungrab=ok");
+		});
+
+		test("XInput2 passive key grab", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(sidecarContainer, "xinput2_passive_key_grab.py", {
+					env: { DISPLAY: ":99" },
+				})
+			).output.trim();
+			expect(output).toContain("key_grab=ok");
+			expect(output).toContain("key_ungrab=ok");
+		});
+
+		test("XInput2 warp pointer generates events", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xinput2_warp_pointer_generates_events.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("x_after_warp=100");
+			expect(output).toContain("y_after_warp=200");
+			expect(output).toContain("warp=ok");
+		});
 	});
 
-	test("ListInputDevices returns pointer and keyboard via xinput", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "listinputdevices_returns_pointer_and_keyboard_via_xinput.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("xi_present=True");
-	});
+test.describe
+	.serial("XI 1.x protocol compliance", () => {
+		test("XInput extension is present", async ({ sidecarContainer }) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				`xinput list 2>&1 || echo "xinput_not_available"`,
+			);
+			// xinput should not error out
+			expect(output).not.toContain("unable to open display");
+		});
 
-	test("xdpyinfo lists XInputExtension", async ({ sidecarContainer }) => {
-		const output = await execInSidecar(sidecarContainer, "xdpyinfo 2>&1");
-		expect(output).toContain("XInputExtension");
+		test("ListInputDevices returns pointer and keyboard via xinput", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"listinputdevices_returns_pointer_and_keyboard_via_xinput.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("xi_present=True");
+		});
+
+		test("xdpyinfo lists XInputExtension", async ({ sidecarContainer }) => {
+			const output = await execInSidecar(sidecarContainer, "xdpyinfo 2>&1");
+			expect(output).toContain("XInputExtension");
+		});
 	});
-});
 
 test.describe("Present extension conformance", () => {
 	test("xdpyinfo lists Present extension", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c",
+			"bash",
+			"-c",
 			"export DISPLAY=:99 && xdpyinfo -queryExtensions 2>&1 | grep -i present",
 		]);
 		expect(result.output).toMatch(/Present/);
@@ -141,7 +188,8 @@ test.describe("Present extension conformance", () => {
 	test("glxinfo probes GLX without crash", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c",
+			"bash",
+			"-c",
 			"export DISPLAY=:99 && timeout 10 glxinfo 2>&1 | head -20; echo EXIT_CODE=$?",
 		]);
 		// glxinfo should complete without crashing the server
@@ -150,12 +198,20 @@ test.describe("Present extension conformance", () => {
 });
 
 test.describe("Present extension conformance", () => {
-	test("Present QueryVersion returns version >= 1.0", async ({ sidecarContainer }) => {
-		const result = await runPythonScript(sidecarContainer, "present_queryversion.py", { env: { DISPLAY: ":99" } });
+	test("Present QueryVersion returns version >= 1.0", async ({
+		sidecarContainer,
+	}) => {
+		const result = await runPythonScript(
+			sidecarContainer,
+			"present_queryversion.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		expect(result.output).toContain("PASS: Present extension available");
 	});
 
-	test("Present QueryCapabilities returns ASYNC capability", async ({ sidecarContainer }) => {
+	test("Present QueryCapabilities returns ASYNC capability", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"bash",
 			"-c",
@@ -174,10 +230,14 @@ test.describe("Present extension conformance", () => {
 });
 
 test.describe("XVideo format conformance", () => {
-	test("XVideo: all 10 FOURCC formats are advertised", async ({ sidecarContainer }) => {
+	test("XVideo: all 10 FOURCC formats are advertised", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				// xvinfo lists adaptor info and supported formats
 				"xvinfo 2>&1",
@@ -190,7 +250,18 @@ test.describe("XVideo format conformance", () => {
 		}
 		// If adaptors are present, verify FOURCC formats
 		const output = result.output;
-		const expectedFormats = ["I420", "YV12", "YUY2", "UYVY", "NV12", "NV21", "YV16", "RGB3", "RV32", "Y800"];
+		const expectedFormats = [
+			"I420",
+			"YV12",
+			"YUY2",
+			"UYVY",
+			"NV12",
+			"NV21",
+			"YV16",
+			"RGB3",
+			"RV32",
+			"Y800",
+		];
 		let foundCount = 0;
 		for (const fmt of expectedFormats) {
 			if (output.includes(fmt)) {
@@ -198,7 +269,9 @@ test.describe("XVideo format conformance", () => {
 			}
 		}
 		if (foundCount > 0) {
-			console.log(`XVideo: found ${foundCount}/${expectedFormats.length} FOURCC formats`);
+			console.log(
+				`XVideo: found ${foundCount}/${expectedFormats.length} FOURCC formats`,
+			);
 			expect(foundCount).toBeGreaterThanOrEqual(5);
 		}
 	});
@@ -206,7 +279,9 @@ test.describe("XVideo format conformance", () => {
 	test("XVideo: query adaptor capabilities", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display",
 				"d = Xlib.display.Display()",
 				"xv = d.query_extension('XVideo')",
@@ -221,13 +296,14 @@ test.describe("XVideo format conformance", () => {
 });
 
 test.describe("Visual depth support", () => {
-	test("xdpyinfo reports multiple depths and visual classes", async ({ sidecarContainer }) => {
+	test("xdpyinfo reports multiple depths and visual classes", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
-				"export DISPLAY=:99",
-				"xdpyinfo 2>&1",
-			].join("\n"),
+			"bash",
+			"-c",
+			["export DISPLAY=:99", "xdpyinfo 2>&1"].join("\n"),
 		]);
 		expect(result.exitCode).toBe(0);
 		// Must report at least depth 24 (root) and depth 32 (ARGB compositing)
@@ -244,7 +320,10 @@ test.describe("Visual depth support", () => {
 
 test.describe("PRESENT extension", () => {
 	test("PRESENT extension is advertised", async ({ sidecarContainer }) => {
-		const result = await sidecarContainer.exec(["xdpyinfo", "-queryExtensions"]);
+		const result = await sidecarContainer.exec([
+			"xdpyinfo",
+			"-queryExtensions",
+		]);
 		expect(result.exitCode).toBe(0);
 		expect(result.output).toContain("Present");
 	});
@@ -262,40 +341,50 @@ test.describe("xdpyinfo comprehensive", () => {
 });
 
 test.describe("Present extension capabilities", () => {
-	test("Present QueryCapabilities returns async capability", async ({ sidecarContainer }) => {
+	test("Present QueryCapabilities returns async capability", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "present_querycapabilities_async.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"present_querycapabilities_async.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`Present capabilities: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 });
 
 test.describe("App compatibility: xclock rendering", () => {
-	test("xclock starts, renders non-trivial pixels (analog clock)", async ({ sidecarContainer }) => {
+	test("xclock starts, renders non-trivial pixels (analog clock)", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"xclock -geometry 200x200+0+0 &",
 				"CLOCK_PID=$!",
 				"sleep 3",
 				"# Verify window exists",
 				"WID=$(xdotool search --name 'xclock' 2>/dev/null | head -1)",
-				"if [ -z \"$WID\" ]; then",
+				'if [ -z "$WID" ]; then',
 				"  echo 'FAIL: xclock window not found'",
 				"  kill $CLOCK_PID 2>/dev/null; exit 1",
 				"fi",
-				"echo \"PASS: xclock window found (id=$WID)\"",
+				'echo "PASS: xclock window found (id=$WID)"',
 				"# Capture window content and count unique colors via import (ImageMagick)",
 				"import -window $WID /tmp/xclock-snap.ppm 2>/dev/null || true",
 				"if [ -f /tmp/xclock-snap.ppm ]; then",
 				"  COLORS=$(identify -verbose /tmp/xclock-snap.ppm 2>/dev/null | grep 'Colors:' | awk '{print $2}')",
-				"  if [ -n \"$COLORS\" ] && [ \"$COLORS\" -gt 2 ]; then",
-				"    echo \"PASS: xclock rendered non-trivial content ($COLORS unique colors)\"",
+				'  if [ -n "$COLORS" ] && [ "$COLORS" -gt 2 ]; then',
+				'    echo "PASS: xclock rendered non-trivial content ($COLORS unique colors)"',
 				"  else",
 				"    # Fallback: check file is non-empty (image data present)",
 				"    SIZE=$(stat -c%s /tmp/xclock-snap.ppm 2>/dev/null || echo 0)",
-				"    if [ \"$SIZE\" -gt 1000 ]; then",
+				'    if [ "$SIZE" -gt 1000 ]; then',
 				"      echo 'PASS: xclock rendered content (snapshot has data)'",
 				"    else",
 				"      echo 'PASS: xclock running (snapshot small but window exists)'",
@@ -311,74 +400,94 @@ test.describe("App compatibility: xclock rendering", () => {
 	});
 });
 
-test.describe.serial("XInput2 extension (Phase 7)", () => {
-	test("XInputExtension is present", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "xinputextension_is_present.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("xi_present=True");
-	});
-});
-
-test.describe.serial("MIT-SHM extension (Phase 7)", () => {
-	test("SHM extension is present", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "shm_extension_is_present.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("shm_present=True");
-	});
-});
-
-test.describe.serial("XI2 protocol compliance", () => {
-	test("XIQueryVersion negotiates version 2.x", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "xiqueryversion_negotiates_version_2_x.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("present=True");
+test.describe
+	.serial("XInput2 extension (Phase 7)", () => {
+		test("XInputExtension is present", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xinputextension_is_present.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("xi_present=True");
+		});
 	});
 
-	test("xinput list shows virtual core devices", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+test.describe
+	.serial("MIT-SHM extension (Phase 7)", () => {
+		test("SHM extension is present", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(sidecarContainer, "shm_extension_is_present.py", {
+					env: { DISPLAY: ":99" },
+				})
+			).output.trim();
+			expect(output).toContain("shm_present=True");
+		});
+	});
+
+test.describe
+	.serial("XI2 protocol compliance", () => {
+		test("XIQueryVersion negotiates version 2.x", async ({
 			sidecarContainer,
-			"xinput list 2>&1 || true",
-		);
-		// Should show virtual core pointer and keyboard
-		expect(output).toMatch(/[Vv]irtual core pointer/i);
-		expect(output).toMatch(/[Vv]irtual core keyboard/i);
-	});
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xiqueryversion_negotiates_version_2_x.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("present=True");
+		});
 
-	test("xinput list-props shows device properties", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+		test("xinput list shows virtual core devices", async ({
 			sidecarContainer,
-			"xinput list-props 2 2>&1 || true",
-		);
-		// Device 2 is the virtual core pointer — should not error
-		expect(output).not.toContain("X Error");
-		expect(output).not.toContain("unable to find device");
-	});
+		}) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				"xinput list 2>&1 || true",
+			);
+			// Should show virtual core pointer and keyboard
+			expect(output).toMatch(/[Vv]irtual core pointer/i);
+			expect(output).toMatch(/[Vv]irtual core keyboard/i);
+		});
 
-	test("xdotool uses XI2 for pointer operations", async ({
-		sidecarContainer,
-	}) => {
-		// xdotool internally uses XI2 for many operations
-		const output = await execInSidecar(
+		test("xinput list-props shows device properties", async ({
 			sidecarContainer,
-			"xdotool getmouselocation 2>&1 || true",
-		);
-		// Should return coordinates without errors
-		expect(output).toMatch(/x:\d+/);
-		expect(output).toMatch(/y:\d+/);
-	});
-});
+		}) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				"xinput list-props 2 2>&1 || true",
+			);
+			// Device 2 is the virtual core pointer — should not error
+			expect(output).not.toContain("X Error");
+			expect(output).not.toContain("unable to find device");
+		});
 
-test.describe.serial("MIT-SCREEN-SAVER extension", () => {
-	test.setTimeout(60_000);
-
-	test("MIT-SCREEN-SAVER extension is present with event base", async ({
-		sidecarContainer,
-	}) => {
-		const output = await probe(sidecarContainer, "screensaver_event_base.py");
-		expect(output).toContain("EXT_OK");
-		expect(output).toContain("EVENT_BASE_92_OK");
+		test("xdotool uses XI2 for pointer operations", async ({
+			sidecarContainer,
+		}) => {
+			// xdotool internally uses XI2 for many operations
+			const output = await execInSidecar(
+				sidecarContainer,
+				"xdotool getmouselocation 2>&1 || true",
+			);
+			// Should return coordinates without errors
+			expect(output).toMatch(/x:\d+/);
+			expect(output).toMatch(/y:\d+/);
+		});
 	});
-});
+
+test.describe
+	.serial("MIT-SCREEN-SAVER extension", () => {
+		test.setTimeout(60_000);
+
+		test("MIT-SCREEN-SAVER extension is present with event base", async ({
+			sidecarContainer,
+		}) => {
+			const output = await probe(sidecarContainer, "screensaver_event_base.py");
+			expect(output).toContain("EXT_OK");
+			expect(output).toContain("EVENT_BASE_92_OK");
+		});
+	});

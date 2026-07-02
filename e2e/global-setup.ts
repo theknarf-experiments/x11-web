@@ -49,10 +49,10 @@ function reapOrphans() {
 	// Per-worker networks (`x11web-worker-*`) created by fixtures.ts.
 	const nets = (() => {
 		try {
-			return execSync(
-				`docker network ls --filter "name=x11web-worker-" -q`,
-				{ encoding: "utf-8", timeout: 10_000 },
-			).trim();
+			return execSync(`docker network ls --filter "name=x11web-worker-" -q`, {
+				encoding: "utf-8",
+				timeout: 10_000,
+			}).trim();
 		} catch {
 			return "";
 		}
@@ -68,17 +68,13 @@ export default async function globalSetup() {
 	reapOrphans();
 
 	await new Promise<void>((resolve, reject) => {
-		exec(
-			"pnpm run build",
-			{ cwd: FRONTEND_DIR },
-			(error, _stdout, stderr) => {
-				if (error) {
-					console.error("Frontend build failed:", stderr);
-					reject(error);
-				} else {
-					resolve();
-				}
-			},
-		);
+		exec("pnpm run build", { cwd: FRONTEND_DIR }, (error, _stdout, stderr) => {
+			if (error) {
+				console.error("Frontend build failed:", stderr);
+				reject(error);
+			} else {
+				resolve();
+			}
+		});
 	});
 }

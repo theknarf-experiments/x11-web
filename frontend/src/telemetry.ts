@@ -18,8 +18,14 @@
 import { type Attributes, trace } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { BatchSpanProcessor, WebTracerProvider } from "@opentelemetry/sdk-trace-web";
-import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import {
+	BatchSpanProcessor,
+	WebTracerProvider,
+} from "@opentelemetry/sdk-trace-web";
+import {
+	ATTR_SERVICE_NAME,
+	ATTR_SERVICE_VERSION,
+} from "@opentelemetry/semantic-conventions";
 import type { FrontendToBackend } from "./types";
 
 const SERVICE_NAME = "x11-web-frontend";

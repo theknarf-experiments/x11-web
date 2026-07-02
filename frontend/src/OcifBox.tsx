@@ -3,15 +3,7 @@ import s from "./OcifBox.module.css";
 import { OcifTextLayer } from "./OcifTextLayer";
 import type { OcifNode } from "./workspaceSync";
 
-export type ResizeHandle =
-	| "n"
-	| "s"
-	| "e"
-	| "w"
-	| "ne"
-	| "nw"
-	| "se"
-	| "sw";
+export type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 interface OcifBoxProps {
 	id: string;
@@ -89,11 +81,7 @@ export function OcifBox({
 	const fill = node.rect?.fill_color ?? DEFAULT_FILL;
 	const stroke = node.rect?.stroke_color ?? DEFAULT_STROKE;
 	const strokeWidth = node.rect?.stroke_width ?? DEFAULT_STROKE_WIDTH;
-	const className = dropTarget
-		? s.dropTarget
-		: selected
-			? s.selected
-			: s.box;
+	const className = dropTarget ? s.dropTarget : selected ? s.selected : s.box;
 	return (
 		<div
 			data-testid="ocif-box"
@@ -138,4 +126,3 @@ export function OcifBox({
 		</div>
 	);
 }
-

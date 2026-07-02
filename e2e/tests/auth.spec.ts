@@ -53,9 +53,9 @@ test("OIDC sign in surfaces the user's email in the menu bar", async ({
 
 	// Back on the SPA, `useAuth` re-fetches `/auth/me` and the bar
 	// flips to the signed-in state.
-	await expect(
-		page.locator('[data-testid="auth-sign-out"]'),
-	).toBeVisible({ timeout: 15_000 });
+	await expect(page.locator('[data-testid="auth-sign-out"]')).toBeVisible({
+		timeout: 15_000,
+	});
 	await expect(page.locator('[data-testid="auth-email"]')).toHaveText(
 		"alice@example.com",
 	);

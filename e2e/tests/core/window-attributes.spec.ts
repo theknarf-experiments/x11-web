@@ -11,74 +11,115 @@ async function execInSidecar(
 	cmd: string,
 	_timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
+	const result = await container.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; ${cmd}`,
+	]);
 	return result.output.trim();
 }
 
-test.describe.serial("Backing store and save-under", () => {
-	test("Backing store mode is reported in GetWindowAttributes", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "backing_store_mode_is_reported_in_getwindowattributes.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("backing_store=2");
-		expect(output).toContain("backing_store_changed=1");
-	});
-
-	test("Save-under flag is stored and reported", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "save_under_flag_is_stored_and_reported.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("save_under=True");
-	});
-
-	test("Server advertises backing store support", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+test.describe
+	.serial("Backing store and save-under", () => {
+		test("Backing store mode is reported in GetWindowAttributes", async ({
 			sidecarContainer,
-			"xdpyinfo 2>&1",
-		);
-		// xdpyinfo should report backing store and save-under support
-		expect(output).toMatch(/backing-store/i);
-		expect(output).toMatch(/save-under/i);
-	});
-});
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"backing_store_mode_is_reported_in_getwindowattributes.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("backing_store=2");
+			expect(output).toContain("backing_store_changed=1");
+		});
 
-test.describe.serial("Bit gravity", () => {
-	test("Bit gravity is stored and returned by GetWindowAttributes", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "bit_gravity_is_stored_and_returned_by_getwindowattributes.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("bit_gravity=9");
-		expect(output).toContain("bit_gravity_changed=5");
+		test("Save-under flag is stored and reported", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"save_under_flag_is_stored_and_reported.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("save_under=True");
+		});
+
+		test("Server advertises backing store support", async ({
+			sidecarContainer,
+		}) => {
+			const output = await execInSidecar(sidecarContainer, "xdpyinfo 2>&1");
+			// xdpyinfo should report backing store and save-under support
+			expect(output).toMatch(/backing-store/i);
+			expect(output).toMatch(/save-under/i);
+		});
 	});
 
-	test("Forget gravity (0) discards pixels on resize", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "forget_gravity_0_discards_pixels_on_resize.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("forget_gravity_resize=ok");
+test.describe
+	.serial("Bit gravity", () => {
+		test("Bit gravity is stored and returned by GetWindowAttributes", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"bit_gravity_is_stored_and_returned_by_getwindowattributes.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("bit_gravity=9");
+			expect(output).toContain("bit_gravity_changed=5");
+		});
+
+		test("Forget gravity (0) discards pixels on resize", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"forget_gravity_0_discards_pixels_on_resize.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("forget_gravity_resize=ok");
+		});
 	});
-});
 
 test.describe("Backing store", () => {
-	test("GetWindowAttributes reports backing-store attribute", async ({ sidecarContainer }) => {
+	test("GetWindowAttributes reports backing-store attribute", async ({
+		sidecarContainer,
+	}) => {
 		// Create a window with backing-store=Always using python3-xlib,
 		// then verify GetWindowAttributes reports it back correctly.
-		const result = await runPythonScript(sidecarContainer, "getwindowattrs_backing_store.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"getwindowattrs_backing_store.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		// X.Always = 2
 		expect(result.output).toContain("backing_store=2");
 	});
 
-	test("backing-planes and backing-pixel are stored", async ({ sidecarContainer }) => {
-		const result = await runPythonScript(sidecarContainer, "backing_planes_pixel_stored.py", { env: { DISPLAY: ":99" } });
+	test("backing-planes and backing-pixel are stored", async ({
+		sidecarContainer,
+	}) => {
+		const result = await runPythonScript(
+			sidecarContainer,
+			"backing_planes_pixel_stored.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		expect(result.output).toContain("planes=0xff0000");
 		expect(result.output).toContain("pixel=0xff00");
 	});
 });
 
 test.describe("Orphan: Backing store", () => {
-	test("GetWindowAttributes reports backing_store support", async ({ sidecarContainer }) => {
+	test("GetWindowAttributes reports backing_store support", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
 			"bash",
@@ -95,60 +136,95 @@ test.describe("Orphan: Backing store", () => {
 	});
 });
 
-test.describe.serial("Window management edge cases", () => {
-	test("Window gravity applied on parent resize", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "window_gravity_applied_on_parent_resize.py", { env: { DISPLAY: ":99" } })).output.trim();
-		// SouthEast gravity: child should move by (100, 100) when parent grows by (100, 100)
-		expect(output).toContain("dx=100");
-		expect(output).toContain("dy=100");
-	});
+test.describe
+	.serial("Window management edge cases", () => {
+		test("Window gravity applied on parent resize", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"window_gravity_applied_on_parent_resize.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			// SouthEast gravity: child should move by (100, 100) when parent grows by (100, 100)
+			expect(output).toContain("dx=100");
+			expect(output).toContain("dy=100");
+		});
 
-	test("Override-redirect windows skip WM redirect", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "override_redirect_windows_skip_wm_redirect.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("override_redirect=1");
-		expect(output).toContain("map_state=2"); // IsViewable
-	});
+		test("Override-redirect windows skip WM redirect", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"override_redirect_windows_skip_wm_redirect.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("override_redirect=1");
+			expect(output).toContain("map_state=2"); // IsViewable
+		});
 
-	test("InputOnly windows have no framebuffer", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "inputonly_windows_have_no_framebuffer.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("class=2"); // InputOnly
-		expect(output).toContain("map_state=2");
-		expect(output).toContain("width=100");
-	});
+		test("InputOnly windows have no framebuffer", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"inputonly_windows_have_no_framebuffer.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("class=2"); // InputOnly
+			expect(output).toContain("map_state=2");
+			expect(output).toContain("width=100");
+		});
 
-	test("CirculateWindow raises/lowers children correctly", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "circulatewindow_raises_lowers_children_correctly.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("initial_count=3");
-		expect(output).toContain("circulated_count=3");
-	});
+		test("CirculateWindow raises/lowers children correctly", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"circulatewindow_raises_lowers_children_correctly.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("initial_count=3");
+			expect(output).toContain("circulated_count=3");
+		});
 
-	test("Deep window hierarchy (50 levels) works", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "deep_window_hierarchy_50_levels_works.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("deepest_width=10");
-		// `windows[-1].translate_coords(root, 0, 0)` translates root's
-		// origin into the deepest window's local frame. The deepest
-		// window sits 50 px below/right of root, so root's (0,0) is at
-		// (-50, -50) in its local coords.
-		expect(output).toContain("translate_x=-50");
-		expect(output).toContain("translate_y=-50");
+		test("Deep window hierarchy (50 levels) works", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"deep_window_hierarchy_50_levels_works.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("deepest_width=10");
+			// `windows[-1].translate_coords(root, 0, 0)` translates root's
+			// origin into the deepest window's local frame. The deepest
+			// window sits 50 px below/right of root, so root's (0,0) is at
+			// (-50, -50) in its local coords.
+			expect(output).toContain("translate_x=-50");
+			expect(output).toContain("translate_y=-50");
+		});
 	});
-});
 
 test.describe("backing store", () => {
-	test("GetWindowAttributes reports backing store support", async ({ sidecarContainer }) => {
+	test("GetWindowAttributes reports backing store support", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display",
 				"d = Xlib.display.Display()",
 				"root = d.screen().root",
@@ -163,10 +239,14 @@ test.describe("backing store", () => {
 		expect(result.output).toContain("BACKING_STORE_PASS");
 	});
 
-	test("window backing store attribute round-trips", async ({ sidecarContainer }) => {
+	test("window backing store attribute round-trips", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display, Xlib.X",
 				"d = Xlib.display.Display()",
 				"root = d.screen().root",

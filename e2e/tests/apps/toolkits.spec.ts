@@ -3,19 +3,29 @@
  * reorganisation pass.
  */
 
-import { test, expect, spawnApp, waitForDock, hasRenderedContent } from "../fixtures";
+import {
+	test,
+	expect,
+	spawnApp,
+	waitForDock,
+	hasRenderedContent,
+} from "../fixtures";
 
 test.describe("Nested X compatibility", () => {
-	test("Xvfb can connect to our server via DISPLAY forwarding", async ({ sidecarContainer }) => {
+	test("Xvfb can connect to our server via DISPLAY forwarding", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"# Verify xdpyinfo shows our server",
 				"xdpyinfo 2>&1 | head -5",
 				"# Check extensions are listed",
 				"EXTS=$(xdpyinfo -queryExtensions 2>&1 | grep -c 'number of extensions')",
-				"if [ -n \"$EXTS\" ]; then",
+				'if [ -n "$EXTS" ]; then',
 				"  echo 'nested-x-ok'",
 				"else",
 				"  echo 'nested-x-fail'",
@@ -27,10 +37,14 @@ test.describe("Nested X compatibility", () => {
 });
 
 test.describe("App compatibility: Xdnd drag-and-drop protocol", () => {
-	test("Xdnd protocol works between two X11 clients", async ({ sidecarContainer }) => {
+	test("Xdnd protocol works between two X11 clients", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(60_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"python3 << 'PYEOF'",
 				"import Xlib.display, Xlib.X, Xlib.Xatom",
@@ -112,15 +126,21 @@ test.describe("App compatibility: Xdnd drag-and-drop protocol", () => {
 				"PYEOF",
 			].join("\n"),
 		]);
-		expect(result.output).toContain("PASS: Xdnd drag-and-drop protocol round-trip complete");
+		expect(result.output).toContain(
+			"PASS: Xdnd drag-and-drop protocol round-trip complete",
+		);
 	});
 });
 
 test.describe("App compatibility: clipboard between apps", () => {
-	test("xclip sets clipboard and xsel reads it back", async ({ sidecarContainer }) => {
+	test("xclip sets clipboard and xsel reads it back", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				"# Set clipboard content via xclip (run in background to serve selection)",
 				"echo -n 'X11_CLIPBOARD_TEST_PAYLOAD_42' | xclip -selection clipboard -i &",
@@ -161,10 +181,14 @@ test.describe("App compatibility: clipboard between apps", () => {
 });
 
 test.describe("App compatibility: GTK3", () => {
-	test("gtk3-demo starts and shuts down cleanly", async ({ sidecarContainer }) => {
+	test("gtk3-demo starts and shuts down cleanly", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				// `pkill -f` would also match this bash script (because it
 				// contains the literal string 'gtk3-demo'), terminating our

@@ -33,7 +33,12 @@ async function spawnFirefoxAndWait(
 	page: Page,
 	args = "--no-remote --new-instance about:blank",
 ): Promise<Locator> {
-	const win = await spawnApp(page, args, "firefox-esr", FIREFOX_STARTUP_TIMEOUT);
+	const win = await spawnApp(
+		page,
+		args,
+		"firefox-esr",
+		FIREFOX_STARTUP_TIMEOUT,
+	);
 	const canvas = win.locator('[data-testid="x11-canvas"]');
 	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
 
@@ -83,18 +88,28 @@ test.skip("DIAG: GIMP click receives input", async ({
 	await waitForDock(page);
 	await sidecarContainer.exec(["bash", "-c", "true > /tmp/sidecar.log"]);
 	// Spawn GIMP interactively (no batch) so the UI window appears.
-	await sidecarContainer.exec(["bash", "-c", "export DISPLAY=:99; gimp --no-data --no-fonts > /tmp/gimp.log 2>&1 &"]);
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"export DISPLAY=:99; gimp --no-data --no-fonts > /tmp/gimp.log 2>&1 &",
+	]);
 	await page.waitForTimeout(20000);
 
 	const canvases = page.locator('[data-testid="x11-canvas"]');
 	const count = await canvases.count();
 	console.log(`Canvases visible: ${count}`);
-	if (count === 0) { console.log("no canvas, abort"); return; }
+	if (count === 0) {
+		console.log("no canvas, abort");
+		return;
+	}
 	const canvas = canvases.nth(count - 1);
 	await canvas.screenshot({ path: "test-results/diag-gimp-before.png" });
 
 	const box = await canvas.boundingBox();
-	if (!box) { console.log("no box"); return; }
+	if (!box) {
+		console.log("no box");
+		return;
+	}
 	const cx = Math.round(box.x + box.width * 0.5);
 	const cy = Math.round(box.y + box.height * 0.5);
 	console.log(`Click GIMP at (${cx}, ${cy})`);
@@ -104,7 +119,11 @@ test.skip("DIAG: GIMP click receives input", async ({
 	await page.waitForTimeout(800);
 	await canvas.screenshot({ path: "test-results/diag-gimp-after.png" });
 
-	const log = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log | tail -8"]);
+	const log = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"grep -aE 'DISPATCH' /tmp/sidecar.log | tail -8",
+	]);
 	console.log("---DISPATCH---\n" + log.output);
 });
 
@@ -148,8 +167,16 @@ test.skip("DIAG: synthetic firefox-like client receives events", async ({
 		"    time.sleep(0.05)",
 	].join("\n");
 	const b64 = Buffer.from(pyScript).toString("base64");
-	await sidecarContainer.exec(["bash", "-c", `printf '%s' '${b64}' | base64 -d > /tmp/fftest.py`]);
-	await sidecarContainer.exec(["bash", "-c", "true > /tmp/fftest.log; export DISPLAY=:99; (python3 /tmp/fftest.py > /tmp/fftest.out 2> /tmp/fftest.log &) ; sleep 2"]);
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		`printf '%s' '${b64}' | base64 -d > /tmp/fftest.py`,
+	]);
+	await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"true > /tmp/fftest.log; export DISPLAY=:99; (python3 /tmp/fftest.py > /tmp/fftest.out 2> /tmp/fftest.log &) ; sleep 2",
+	]);
 	await page.waitForTimeout(3000);
 
 	// Now the synthetic window should be on the canvas — find its locator.
@@ -171,9 +198,17 @@ test.skip("DIAG: synthetic firefox-like client receives events", async ({
 	await page.keyboard.press("a");
 	await page.waitForTimeout(300);
 
-	const log = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log 2>/dev/null | tail -10"]);
+	const log = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"grep -aE 'DISPATCH' /tmp/sidecar.log 2>/dev/null | tail -10",
+	]);
 	console.log("---DISPATCH---\n" + log.output);
-	const fft = await sidecarContainer.exec(["bash", "-c", "head -30 /tmp/fftest.log"]);
+	const fft = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"head -30 /tmp/fftest.log",
+	]);
 	console.log("---FFTEST events received---\n" + fft.output);
 });
 
@@ -272,7 +307,10 @@ test.skip("xdotool clicks reach the window under the pointer", async ({
 		`export DISPLAY=:99; xwininfo -root -tree | head -30`,
 	]);
 	const lines = winInfo.output.split("\n");
-	let wx = 0, wy = 0, w = 0, h = 0;
+	let wx = 0,
+		wy = 0,
+		w = 0,
+		h = 0;
 	for (const line of lines) {
 		const m = line.match(
 			/0x[0-9a-f]+[^\n]*?(\d{2,4})x(\d{2,4})\+(-?\d+)\+(-?\d+)/,
@@ -343,10 +381,12 @@ EOF`,
 	);
 	const canvas = win.locator('[data-testid="x11-canvas"]');
 	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
-	await expect.poll(async () => hasRenderedContent(canvas), {
-		timeout: FIREFOX_STARTUP_TIMEOUT,
-		intervals: [3000, 5000, 5000],
-	}).toBe(true);
+	await expect
+		.poll(async () => hasRenderedContent(canvas), {
+			timeout: FIREFOX_STARTUP_TIMEOUT,
+			intervals: [3000, 5000, 5000],
+		})
+		.toBe(true);
 	await page.waitForTimeout(8000); // let Firefox fully settle
 
 	const box = await canvas.boundingBox();
@@ -434,15 +474,20 @@ chmod +x /usr/local/bin/firefox-no-xi2`,
 	);
 	const canvas = win.locator('[data-testid="x11-canvas"]');
 	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
-	await expect.poll(async () => hasRenderedContent(canvas), {
-		timeout: FIREFOX_STARTUP_TIMEOUT,
-		intervals: [3000, 5000, 5000, 10000, 10000],
-	}).toBe(true);
+	await expect
+		.poll(async () => hasRenderedContent(canvas), {
+			timeout: FIREFOX_STARTUP_TIMEOUT,
+			intervals: [3000, 5000, 5000, 10000, 10000],
+		})
+		.toBe(true);
 	await page.waitForTimeout(3000);
 	await canvas.screenshot({ path: "test-results/ff-close-before.png" });
 
 	const box = await canvas.boundingBox();
-	if (!box) { console.log("no box"); return; }
+	if (!box) {
+		console.log("no box");
+		return;
+	}
 
 	// Click the "X" close button of the Privacy Notice tab at canvas
 	// (~478, 22). If it works, the tab will close and the bar will
@@ -452,7 +497,11 @@ chmod +x /usr/local/bin/firefox-no-xi2`,
 	await page.mouse.click(box.x + 478, box.y + 22);
 	await page.waitForTimeout(1500);
 	await canvas.screenshot({ path: "test-results/ff-after-close-tab.png" });
-	const log1 = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5"]);
+	const log1 = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5",
+	]);
 	console.log("---DISPATCH---\n" + log1.output);
 
 	// Click the refresh icon at canvas (~95, 63)
@@ -461,7 +510,11 @@ chmod +x /usr/local/bin/firefox-no-xi2`,
 	await page.mouse.click(box.x + 95, box.y + 63);
 	await page.waitForTimeout(1500);
 	await canvas.screenshot({ path: "test-results/ff-after-refresh.png" });
-	const log2 = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5"]);
+	const log2 = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5",
+	]);
 	console.log("---DISPATCH---\n" + log2.output);
 });
 
@@ -508,15 +561,20 @@ EOF`,
 	await expect(canvas).toBeVisible({ timeout: FIREFOX_STARTUP_TIMEOUT });
 
 	// Wait for Firefox to render content
-	await expect.poll(async () => hasRenderedContent(canvas), {
-		timeout: FIREFOX_STARTUP_TIMEOUT,
-		intervals: [3000, 5000, 5000, 10000, 10000],
-	}).toBe(true);
+	await expect
+		.poll(async () => hasRenderedContent(canvas), {
+			timeout: FIREFOX_STARTUP_TIMEOUT,
+			intervals: [3000, 5000, 5000, 10000, 10000],
+		})
+		.toBe(true);
 	await page.waitForTimeout(3000);
 	await canvas.screenshot({ path: "test-results/clean-profile-before.png" });
 
 	const box = await canvas.boundingBox();
-	if (!box) { console.log("no box"); return; }
+	if (!box) {
+		console.log("no box");
+		return;
+	}
 	console.log(`canvas box: ${JSON.stringify(box)}`);
 
 	// Inspect the actual canvas DOM attributes vs CSS rect — if the
@@ -543,7 +601,11 @@ EOF`,
 	await page.mouse.click(hamburgerX, hamburgerY);
 	await page.waitForTimeout(1000);
 	await canvas.screenshot({ path: "test-results/clean-profile-hamburger.png" });
-	const dispLog = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5"]);
+	const dispLog = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"grep -aE 'DISPATCH' /tmp/sidecar.log | tail -5",
+	]);
 	console.log("---DISPATCH for hamburger click---\n" + dispLog.output);
 
 	// Inspect Firefox's content child window — actual position/size
@@ -561,11 +623,13 @@ EOF`,
 			'for c in $(xwininfo -id "$TOP" -tree | grep -oE "0x[0-9a-f]+" | grep -v "$TOP" | head -2); do',
 			'  echo "child $c:"',
 			'  xwininfo -id "$c" -all 2>&1 | head -20',
-			'done',
+			"done",
 		].join("\n"),
 	]);
 	console.log("---FIREFOX WINDOWS---\n" + ffWindows.output);
-	await canvas.screenshot({ path: "test-results/clean-profile-after-urlbar-click.png" });
+	await canvas.screenshot({
+		path: "test-results/clean-profile-after-urlbar-click.png",
+	});
 	await page.keyboard.type("about:config", { delay: 30 });
 	await page.waitForTimeout(500);
 	await canvas.screenshot({ path: "test-results/clean-profile-typed.png" });
@@ -602,7 +666,10 @@ test.skip("DIAG: Firefox click delivery target", async ({
 	]);
 	console.log("---FIREFOX IDS---\n" + findIds.output);
 	const m = findIds.output.match(/TOP=(0x[0-9a-f]+)\s+CHILD=(0x[0-9a-f]+)/);
-	if (!m) { console.log("could not parse"); return; }
+	if (!m) {
+		console.log("could not parse");
+		return;
+	}
 	const topId = m[1];
 	const childId = m[2];
 	console.log(`Top=${topId} Child=${childId}`);
@@ -638,15 +705,27 @@ test.skip("DIAG: Firefox click delivery target", async ({
 	await canvas.screenshot({ path: "test-results/diag-after-ctrl-l-type.png" });
 
 	// Sidecar dispatch log + byte writes (full)
-	const log = await sidecarContainer.exec(["bash", "-c", "grep -aE 'DISPATCH|WRITE_INPUT' /tmp/sidecar.log"]);
+	const log = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"grep -aE 'DISPATCH|WRITE_INPUT' /tmp/sidecar.log",
+	]);
 	console.log("---DISPATCH/WRITE---\n" + log.output);
 
 	// Map peer pid → process name to see which app got the bytes
-	const procs = await sidecarContainer.exec(["bash", "-c", "ps axo pid,comm | grep -iE 'firefox|xterm|xev' | head"]);
+	const procs = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"ps axo pid,comm | grep -iE 'firefox|xterm|xev' | head",
+	]);
 	console.log("---PROCS---\n" + procs.output);
 
 	// Full window tree to see what overlays / popups are active
-	const tree = await sidecarContainer.exec(["bash", "-c", "export DISPLAY=:99; xwininfo -root -tree 2>&1 | head -80"]);
+	const tree = await sidecarContainer.exec([
+		"bash",
+		"-c",
+		"export DISPLAY=:99; xwininfo -root -tree 2>&1 | head -80",
+	]);
 	console.log("---WINDOW TREE---\n" + tree.output);
 });
 
@@ -662,22 +741,27 @@ test.skip("DIAG: keyboard Ctrl+L navigation", async ({
 	await waitForDock(page);
 
 	// Spawn Firefox with about:blank so there's no newtab noise
-	const canvas = await spawnFirefoxAndWait(page, "--no-remote --new-instance about:blank");
+	const canvas = await spawnFirefoxAndWait(
+		page,
+		"--no-remote --new-instance about:blank",
+	);
 	await waitForCanvasStable(canvas, { stableMs: 2000, totalTimeoutMs: 30_000 });
 	await canvas.screenshot({ path: "test-results/ctrl-l-1-before.png" });
 
 	// Check WM_PROTOCOLS and the *actual* event masks on all Firefox windows
-	const ffWin = await sidecarContainer.exec(["bash", "-c",
+	const ffWin = await sidecarContainer.exec([
+		"bash",
+		"-c",
 		"export DISPLAY=:99; " +
-		"FF=$(xwininfo -root -tree | grep 'Mozilla Firefox.*Navigator' | grep -oE '0x[0-9a-f]+' | head -1); " +
-		"echo \"FF=$FF\"; " +
-		"xprop -id \"$FF\" WM_PROTOCOLS WM_HINTS 2>&1; " +
-		"echo '--- xprop event masks on all children ---'; " +
-		"for c in $(xwininfo -id $FF -tree 2>/dev/null | grep -oE '0x[0-9a-f]+' | grep -v \"^$FF\$\"); do " +
-		"  echo -n \"child $c xprop: \"; xprop -id $c 2>/dev/null | grep -i 'event.*mask\\|all.*event\\|your.*event'; " +
-		"done; " +
-		"echo '--- getinputfocus before click ---'; " +
-		"xdotool getwindowfocus 2>&1"
+			"FF=$(xwininfo -root -tree | grep 'Mozilla Firefox.*Navigator' | grep -oE '0x[0-9a-f]+' | head -1); " +
+			'echo "FF=$FF"; ' +
+			'xprop -id "$FF" WM_PROTOCOLS WM_HINTS 2>&1; ' +
+			"echo '--- xprop event masks on all children ---'; " +
+			"for c in $(xwininfo -id $FF -tree 2>/dev/null | grep -oE '0x[0-9a-f]+' | grep -v \"^$FF\$\"); do " +
+			"  echo -n \"child $c xprop: \"; xprop -id $c 2>/dev/null | grep -i 'event.*mask\\|all.*event\\|your.*event'; " +
+			"done; " +
+			"echo '--- getinputfocus before click ---'; " +
+			"xdotool getwindowfocus 2>&1",
 	]);
 	console.log("Firefox props:\n" + ffWin.output);
 
@@ -689,28 +773,36 @@ test.skip("DIAG: keyboard Ctrl+L navigation", async ({
 	// This mirrors the approach from x11-web.spec.ts "firefox responds to mouse and keyboard input"
 	await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.08);
 	await page.waitForTimeout(1000);
-	await canvas.screenshot({ path: "test-results/ctrl-l-2-after-urlbar-click.png" });
+	await canvas.screenshot({
+		path: "test-results/ctrl-l-2-after-urlbar-click.png",
+	});
 
-	const focusAfterUrlBar = await sidecarContainer.exec(["bash", "-c",
+	const focusAfterUrlBar = await sidecarContainer.exec([
+		"bash",
+		"-c",
 		"export DISPLAY=:99; FWIN=$(xdotool getwindowfocus 2>/dev/null); echo \"focus=0x$(printf '%x' $FWIN)\"",
 	]);
 	console.log("focus after url bar click:", focusAfterUrlBar.output.trim());
 
 	// Give DOM focus to canvas then type
-	await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.08 } });
+	await canvas.click({
+		position: { x: box.width * 0.5, y: box.height * 0.08 },
+	});
 	await page.waitForTimeout(300);
-	await page.keyboard.type('about:config', { delay: 50 });
+	await page.keyboard.type("about:config", { delay: 50 });
 	await page.waitForTimeout(500);
 	await canvas.screenshot({ path: "test-results/ctrl-l-3-typed.png" });
 
-	await page.keyboard.press('Enter');
+	await page.keyboard.press("Enter");
 	await page.waitForTimeout(5000);
 	await waitForCanvasStable(canvas, { stableMs: 2000, totalTimeoutMs: 30_000 });
 	await canvas.screenshot({ path: "test-results/ctrl-l-4-after-enter.png" });
 
 	// If navigation worked, the title should change
 	await expect(
-		page.locator('[data-testid="window-frame"]').filter({ hasText: /Advanced Preferences|about:config/i }),
+		page
+			.locator('[data-testid="window-frame"]')
+			.filter({ hasText: /Advanced Preferences|about:config/i }),
 	).toBeVisible({ timeout: 10_000 });
 });
 
@@ -757,7 +849,9 @@ test("firefox: navigate to about:config", async ({
 	// "Advanced Preferences — Mozilla Firefox". The SPA renders the WM_NAME
 	// as visible text in the window frame — assert on that directly.
 	await expect(
-		page.locator('[data-testid="window-frame"]').filter({ hasText: /Advanced Preferences/i }),
+		page
+			.locator('[data-testid="window-frame"]')
+			.filter({ hasText: /Advanced Preferences/i }),
 	).toBeVisible({ timeout: 10_000 });
 });
 
@@ -783,7 +877,9 @@ test("firefox: navigate to Wikipedia", async ({
 
 	// Verify the page loaded by asserting the WM_NAME in the DOM window frame.
 	await expect(
-		page.locator('[data-testid="window-frame"]').filter({ hasText: /Wikipedia/i }),
+		page
+			.locator('[data-testid="window-frame"]')
+			.filter({ hasText: /Wikipedia/i }),
 	).toBeVisible({ timeout: 10_000 });
 });
 
@@ -863,7 +959,8 @@ test.skip("firefox: navigate to YouTube", async ({
 	await canvas.screenshot({ path: "test-results/firefox-youtube.png" });
 
 	const title = await sidecarContainer.exec([
-		"bash", "-c",
+		"bash",
+		"-c",
 		"export DISPLAY=:99; xdotool search --name 'YouTube' getwindowname 2>/dev/null | head -1",
 	]);
 	expect(title.output.trim()).toMatch(/YouTube/i);

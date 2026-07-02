@@ -11,24 +11,37 @@ async function execInSidecar(
 	cmd: string,
 	_timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
+	const result = await container.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; ${cmd}`,
+	]);
 	return result.output.trim();
 }
 
-test.describe.serial("SHAPE extension", () => {
-	test("ShapeRectangles sets window shape", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "shaperectangles_sets_window_shape.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("shape_present=True");
+test.describe
+	.serial("SHAPE extension", () => {
+		test("ShapeRectangles sets window shape", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"shaperectangles_sets_window_shape.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("shape_present=True");
+		});
 	});
-});
 
 test.describe("SHAPE extension conformance", () => {
-	test("SHAPE: set bounding region and query extents", async ({ sidecarContainer }) => {
+	test("SHAPE: set bounding region and query extents", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display, Xlib.ext.shape",
 				"d = Xlib.display.Display()",
 				"d.shape_query_version()",
@@ -58,10 +71,14 @@ test.describe("SHAPE extension conformance", () => {
 		expect(result.output).toContain("bounding_h=50");
 	});
 
-	test("SHAPE: combine bounding regions (Union)", async ({ sidecarContainer }) => {
+	test("SHAPE: combine bounding regions (Union)", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display, Xlib.ext.shape",
 				"d = Xlib.display.Display()",
 				"d.shape_query_version()",
@@ -90,7 +107,9 @@ test.describe("SHAPE extension conformance", () => {
 	test("SHAPE: clip region affects drawing", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display, Xlib.ext.shape",
 				"d = Xlib.display.Display()",
 				"d.shape_query_version()",
@@ -114,68 +133,88 @@ test.describe("SHAPE extension conformance", () => {
 
 test.describe("SHAPE extension queries", () => {
 	test("xdpyinfo shows SHAPE extension", async ({ sidecarContainer }) => {
-		const result = await sidecarContainer.exec(["xdpyinfo", "-queryExtensions"]);
+		const result = await sidecarContainer.exec([
+			"xdpyinfo",
+			"-queryExtensions",
+		]);
 		expect(result.exitCode).toBe(0);
 		expect(result.output).toContain("SHAPE");
 	});
 });
 
-test.describe.serial("Extension deep tests", () => {
-	test.setTimeout(60_000);
+test.describe
+	.serial("Extension deep tests", () => {
+		test.setTimeout(60_000);
 
-	test("SHAPE extension: set window shape", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "shape_extension_set_window_shape.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("SHAPE_PRESENT");
-	});
+		test("SHAPE extension: set window shape", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"shape_extension_set_window_shape.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("SHAPE_PRESENT");
+		});
 
-	test("COMPOSITE extension: redirect window", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "composite_extension_redirect_window.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("COMPOSITE_PRESENT");
-	});
-
-	test("XFIXES extension: create region", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "xfixes_extension_create_region.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("XFIXES_PRESENT");
-	});
-
-	test("RANDR extension: query screen resources", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+		test("COMPOSITE extension: redirect window", async ({
 			sidecarContainer,
-			"xrandr 2>&1",
-		);
-		expect(output).not.toContain("Failed to get size");
-		// Should show at least one output/mode
-		expect(output).toMatch(/\d+x\d+/);
-	});
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"composite_extension_redirect_window.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("COMPOSITE_PRESENT");
+		});
 
-	test("XInput2 is available via xinput", async ({ sidecarContainer }) => {
-		const output = await execInSidecar(
+		test("XFIXES extension: create region", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xfixes_extension_create_region.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("XFIXES_PRESENT");
+		});
+
+		test("RANDR extension: query screen resources", async ({
 			sidecarContainer,
-			"xinput list 2>&1",
-		);
-		expect(output).not.toContain("unable to open display");
-		// Should list at least virtual core pointer and keyboard
-		expect(output).toMatch(/pointer|keyboard/i);
-	});
+		}) => {
+			const output = await execInSidecar(sidecarContainer, "xrandr 2>&1");
+			expect(output).not.toContain("Failed to get size");
+			// Should show at least one output/mode
+			expect(output).toMatch(/\d+x\d+/);
+		});
 
-	test("XTEST extension: simulate input", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "xtest_extension_simulate_input.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("XTEST_PRESENT");
-	});
+		test("XInput2 is available via xinput", async ({ sidecarContainer }) => {
+			const output = await execInSidecar(sidecarContainer, "xinput list 2>&1");
+			expect(output).not.toContain("unable to open display");
+			// Should list at least virtual core pointer and keyboard
+			expect(output).toMatch(/pointer|keyboard/i);
+		});
 
-	test("MIT-SHM PutImage via xclip", async ({ sidecarContainer }) => {
-		// Test shared memory via a real tool
-		const output = await execInSidecar(
-			sidecarContainer,
-			`echo "test_clipboard_data" | xclip -selection clipboard 2>&1
+		test("XTEST extension: simulate input", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"xtest_extension_simulate_input.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("XTEST_PRESENT");
+		});
+
+		test("MIT-SHM PutImage via xclip", async ({ sidecarContainer }) => {
+			// Test shared memory via a real tool
+			const output = await execInSidecar(
+				sidecarContainer,
+				`echo "test_clipboard_data" | xclip -selection clipboard 2>&1
 xclip -selection clipboard -o 2>&1`,
-		);
-		expect(output).toContain("test_clipboard_data");
+			);
+			expect(output).toContain("test_clipboard_data");
+		});
 	});
-});

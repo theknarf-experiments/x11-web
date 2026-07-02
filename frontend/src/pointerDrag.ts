@@ -100,8 +100,14 @@ export interface ResizeResult {
 }
 
 export function computeResize(i: ResizeInputs): ResizeResult {
-	const width = Math.max(i.minW, Math.round(i.origW + (i.flipX ? -i.dx : i.dx)));
-	const height = Math.max(i.minH, Math.round(i.origH + (i.flipY ? -i.dy : i.dy)));
+	const width = Math.max(
+		i.minW,
+		Math.round(i.origW + (i.flipX ? -i.dx : i.dx)),
+	);
+	const height = Math.max(
+		i.minH,
+		Math.round(i.origH + (i.flipY ? -i.dy : i.dy)),
+	);
 	const x = i.flipX ? i.origX + (i.origW - width) : i.origX;
 	const y = i.flipY ? i.origY + (i.origH - height) : i.origY;
 	return { x, y, width, height };

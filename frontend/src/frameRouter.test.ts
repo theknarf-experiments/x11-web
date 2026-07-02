@@ -58,11 +58,9 @@ function FrameRouterHost({
 
 function mountRouter() {
 	let registered: ((b: Uint8Array) => void) | null = null;
-	const onDataChannelMessage = vi.fn(
-		(cb: ((b: Uint8Array) => void) | null) => {
-			registered = cb;
-		},
-	);
+	const onDataChannelMessage = vi.fn((cb: ((b: Uint8Array) => void) | null) => {
+		registered = cb;
+	});
 	const handleRef: { current: RouterHandle | null } = { current: null };
 	const container = document.createElement("div");
 	document.body.appendChild(container);

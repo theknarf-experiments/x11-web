@@ -9,14 +9,21 @@ import { test, expect } from "../fixtures";
 
 test.describe("DRI3 is not advertised", () => {
 	test("xdpyinfo does not list DRI3", async ({ sidecarContainer }) => {
-		const result = await sidecarContainer.exec(["xdpyinfo", "-queryExtensions"]);
+		const result = await sidecarContainer.exec([
+			"xdpyinfo",
+			"-queryExtensions",
+		]);
 		expect(result.exitCode).toBe(0);
 		expect(result.output).not.toContain("DRI3");
 	});
 
-	test("QueryExtension reports DRI3 as missing", async ({ sidecarContainer }) => {
+	test("QueryExtension reports DRI3 as missing", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99",
 				// python-xlib's query_extension returns None for missing
 				// extensions; print the literal so we can assert below.

@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi } from "vitest";
-import {
-	computeResize,
-	getCanvasScale,
-	startPointerDrag,
-} from "./pointerDrag";
+import { computeResize, getCanvasScale, startPointerDrag } from "./pointerDrag";
 
 describe("computeResize", () => {
 	const base = {

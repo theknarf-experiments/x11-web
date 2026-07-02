@@ -293,7 +293,9 @@ export function touchListCenter(touches: TouchList): { x: number; y: number } {
 		sx += touches[i].clientX;
 		sy += touches[i].clientY;
 	}
-	return touches.length > 0 ? { x: sx / touches.length, y: sy / touches.length } : { x: 0, y: 0 };
+	return touches.length > 0
+		? { x: sx / touches.length, y: sy / touches.length }
+		: { x: 0, y: 0 };
 }
 
 export function attachSwipeGesture(
@@ -433,7 +435,11 @@ export function attachDndBridge(
 		if (text) {
 			onInput({
 				kind: "DndBridge",
-				event: { kind: "Drop", mime_type: "text/plain", data: enc.encode(text) },
+				event: {
+					kind: "Drop",
+					mime_type: "text/plain",
+					data: enc.encode(text),
+				},
 			});
 			return;
 		}

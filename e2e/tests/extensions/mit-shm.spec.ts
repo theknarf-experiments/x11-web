@@ -7,7 +7,10 @@ import { test, expect } from "../fixtures";
 
 test.describe("SHM extension", () => {
 	test("MIT-SHM extension is available", async ({ sidecarContainer }) => {
-		const result = await sidecarContainer.exec(["xdpyinfo", "-queryExtensions"]);
+		const result = await sidecarContainer.exec([
+			"xdpyinfo",
+			"-queryExtensions",
+		]);
 		expect(result.exitCode).toBe(0);
 		expect(result.output).toContain("MIT-SHM");
 	});

@@ -9,7 +9,9 @@ test.describe("screen saver", () => {
 	test("GetScreenSaver returns settings", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display",
 				"d = Xlib.display.Display()",
 				"ss = d.get_screen_saver()",
@@ -27,7 +29,9 @@ test.describe("screen saver", () => {
 	test("SetScreenSaver round-trips timeout", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display",
 				"d = Xlib.display.Display()",
 				"d.set_screen_saver(timeout=300, interval=60, prefer_blank=1, allow_exposures=1)",
@@ -45,10 +49,14 @@ test.describe("screen saver", () => {
 		expect(result.output).toContain("SCREEN_SAVER_SET_PASS");
 	});
 
-	test("ForceScreenSaver activate/reset works", async ({ sidecarContainer }) => {
+	test("ForceScreenSaver activate/reset works", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display",
 				"d = Xlib.display.Display()",
 				"d.force_screen_saver(1)  # Activate",

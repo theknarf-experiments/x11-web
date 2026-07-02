@@ -6,10 +6,13 @@
 import { test, expect } from "../fixtures";
 
 test.describe("App compatibility: Chromium", () => {
-	test("chromium creates an X11 window and xwininfo reports it", async ({ sidecarContainer }) => {
+	test("chromium creates an X11 window and xwininfo reports it", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(120_000);
 		const which = await sidecarContainer.exec([
-			"bash", "-c",
+			"bash",
+			"-c",
 			"which chromium 2>/dev/null || which chromium-browser 2>/dev/null || echo NONE",
 		]);
 		if (which.output.trim() === "NONE") {
@@ -17,7 +20,9 @@ test.describe("App compatibility: Chromium", () => {
 			return;
 		}
 		const result = await sidecarContainer.exec([
-			"bash", "-c", [
+			"bash",
+			"-c",
+			[
 				"export DISPLAY=:99 HOME=/root",
 				"mkdir -p /root/.config",
 				"chromium --no-sandbox --disable-gpu --no-first-run --disable-extensions --disable-background-networking --user-data-dir=/tmp/chromium-test 'about:blank' &",
@@ -25,11 +30,11 @@ test.describe("App compatibility: Chromium", () => {
 				"# Wait for chromium window to appear",
 				"for i in $(seq 1 20); do",
 				"  WID=$(xdotool search --name '[Cc]hromium' 2>/dev/null | head -1)",
-				"  if [ -n \"$WID\" ]; then break; fi",
+				'  if [ -n "$WID" ]; then break; fi',
 				"  sleep 1",
 				"done",
-				"if [ -n \"$WID\" ]; then",
-				"  echo \"FOUND_CHROMIUM_WINDOW=$WID\"",
+				'if [ -n "$WID" ]; then',
+				'  echo "FOUND_CHROMIUM_WINDOW=$WID"',
 				"  # Verify xwininfo can query the window",
 				"  WININFO=$(xwininfo -id $WID 2>&1)",
 				"  if echo \"$WININFO\" | grep -q 'Width:'; then",

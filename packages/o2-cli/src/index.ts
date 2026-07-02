@@ -67,10 +67,17 @@ const formatLog = (h: SearchHit): string => {
 program
 	.command("logs")
 	.description("Recent log lines, optionally filtered by service.")
-	.option("-s, --service <name>", "filter by `service.name` (e.g. x11-web-backend)")
+	.option(
+		"-s, --service <name>",
+		"filter by `service.name` (e.g. x11-web-backend)",
+	)
 	.option("--since <duration>", "lookback window (30s, 5m, 1h, 2d)", "1h")
 	.option("-n, --limit <n>", "max rows", "50")
-	.option("-f, --follow", "tail new log lines as they arrive (poll every 2s)", false)
+	.option(
+		"-f, --follow",
+		"tail new log lines as they arrive (poll every 2s)",
+		false,
+	)
 	.action(async (raw) => {
 		const opts = LogsOptionsSchema.parse(raw);
 		const cli = new O2Client(configFromEnv());
@@ -87,8 +94,14 @@ program
 			`WHERE _timestamp >= ${initialWindow.startTime}` +
 			`${serviceFilter} ORDER BY _timestamp DESC LIMIT ${opts.limit}`;
 		const initial = (
-			await cli.search({ sql: initialSql, ...initialWindow, streamType: "logs" })
-		).slice().reverse();
+			await cli.search({
+				sql: initialSql,
+				...initialWindow,
+				streamType: "logs",
+			})
+		)
+			.slice()
+			.reverse();
 		emit(initial, formatLog);
 		if (!opts.follow) return;
 
@@ -122,13 +135,20 @@ program
 const TraceArgsSchema = z.object({
 	traceId: z
 		.string()
-		.regex(/^[0-9a-fA-F]{32}$/, "trace_id must be 32 hex chars (W3C Trace Context)"),
+		.regex(
+			/^[0-9a-fA-F]{32}$/,
+			"trace_id must be 32 hex chars (W3C Trace Context)",
+		),
 });
 
 program
 	.command("trace <trace_id>")
 	.description("Fetch every span belonging to a trace.")
-	.option("--since <duration>", "lookback window (default 24h — traces age out)", "24h")
+	.option(
+		"--since <duration>",
+		"lookback window (default 24h — traces age out)",
+		"24h",
+	)
 	.action(async (traceId, raw) => {
 		const args = TraceArgsSchema.parse({ traceId });
 		const since = (raw.since ?? "24h") as string;
@@ -148,7 +168,8 @@ program
 			const ts = formatMicros(h._timestamp);
 			const svc = (h.service_name ?? "").toString().padEnd(20);
 			const op = (h.operation_name ?? "").toString().padEnd(36);
-			const dur = h.duration != null ? `${Math.round(Number(h.duration) / 1000)}ms` : "-";
+			const dur =
+				h.duration != null ? `${Math.round(Number(h.duration) / 1000)}ms` : "-";
 			return `${ts}  ${svc}  ${op}  span=${h.span_id}  parent=${h.parent_span_id ?? "-"}  ${dur}`;
 		});
 	});
@@ -178,7 +199,14 @@ program
 		const hits = await cli.search({ sql, ...window, streamType: "traces" });
 		// Pick the lowest start_time per trace_id as the root.
 		// span_count is best-effort within the scan window.
-		type Row = { traceId: string; service: string; op: string; start: number; duration: number; spanCount: number };
+		type Row = {
+			traceId: string;
+			service: string;
+			op: string;
+			start: number;
+			duration: number;
+			spanCount: number;
+		};
 		const byTrace = new Map<string, Row>();
 		for (const h of hits) {
 			const traceId = String(h.trace_id ?? "");
@@ -221,9 +249,12 @@ program
 			const ts = new Date(Math.round(t.start / 1_000_000)).toISOString();
 			const svc = t.service.padEnd(20);
 			const op = t.op.padEnd(36);
-			const dur =
-				t.duration ? `${Math.round(t.duration / 1000)}ms`.padStart(8) : "       -";
-			console.log(`${ts}  ${t.traceId}  ${svc}  ${op}  ${dur}  spans=${t.spanCount}`);
+			const dur = t.duration
+				? `${Math.round(t.duration / 1000)}ms`.padStart(8)
+				: "       -";
+			console.log(
+				`${ts}  ${t.traceId}  ${svc}  ${op}  ${dur}  spans=${t.spanCount}`,
+			);
 		}
 	});
 
@@ -234,12 +265,17 @@ const FieldsArgsSchema = z.object({
 
 program
 	.command("fields <stream>")
-	.description("Show columns of a stream's schema (handy because OpenObserve grows the schema lazily).")
+	.description(
+		"Show columns of a stream's schema (handy because OpenObserve grows the schema lazily).",
+	)
 	.option("-t, --type <kind>", "stream type: logs | traces | metrics", "logs")
 	.action(async (stream, raw) => {
 		const args = FieldsArgsSchema.parse({ stream, type: raw.type });
 		const cli = new O2Client(configFromEnv());
-		const fields = await cli.getStreamSchema(args.stream, args.type as StreamType);
+		const fields = await cli.getStreamSchema(
+			args.stream,
+			args.type as StreamType,
+		);
 		if (program.opts().json) {
 			console.log(JSON.stringify(fields, null, 2));
 			return;
@@ -265,7 +301,9 @@ const MetricArgsSchema = z.object({
 
 program
 	.command("metric <name>")
-	.description("Recent samples for a metric. Stream name is derived from the OTel instrument name (dots → underscores).")
+	.description(
+		"Recent samples for a metric. Stream name is derived from the OTel instrument name (dots → underscores).",
+	)
 	.option("--since <duration>", "lookback window (default 1h)", "1h")
 	.option("-n, --limit <n>", "max rows", "50")
 	.action(async (name, raw) => {

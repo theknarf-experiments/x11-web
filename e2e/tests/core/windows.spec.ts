@@ -5,107 +5,184 @@
 
 import { test, expect, runPythonScript } from "../fixtures";
 
-test.describe.serial("Advanced event delivery", () => {
-	test("Enter/Leave events generated on pointer warp", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "enter_leave_events_generated_on_pointer_warp.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("got_enter=True");
-	});
+test.describe
+	.serial("Advanced event delivery", () => {
+		test("Enter/Leave events generated on pointer warp", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"enter_leave_events_generated_on_pointer_warp.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("got_enter=True");
+		});
 
-	test("FocusIn/FocusOut events on SetInputFocus", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "focusin_focusout_events_on_setinputfocus.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("focus_w1=True");
-		expect(output).toContain("focus_w2=True");
-		expect(output).toContain("got_focus_in=True");
-	});
+		test("FocusIn/FocusOut events on SetInputFocus", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"focusin_focusout_events_on_setinputfocus.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("focus_w1=True");
+			expect(output).toContain("focus_w2=True");
+			expect(output).toContain("got_focus_in=True");
+		});
 
-	test("ConfigureNotify on sibling stacking change", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "configurenotify_on_sibling_stacking_change.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("got_configure_notify=True");
+		test("ConfigureNotify on sibling stacking change", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"configurenotify_on_sibling_stacking_change.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("got_configure_notify=True");
+		});
 	});
-});
 
 test.describe("Bounds checking", () => {
 	test("CreateWindow rejects zero dimensions", async ({ sidecarContainer }) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "createwindow_rejects_zero_dimensions.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"createwindow_rejects_zero_dimensions.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`Bounds checking: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 });
 
-test.describe.serial("SubstructureRedirect compliance", () => {
-	test.setTimeout(60_000);
+test.describe
+	.serial("SubstructureRedirect compliance", () => {
+		test.setTimeout(60_000);
 
-	test("SubstructureRedirectMask can be set on non-root parent", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "substructureredirectmask_can_be_set_on_non_root_parent.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("CHILD_MAP_OK");
+		test("SubstructureRedirectMask can be set on non-root parent", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"substructureredirectmask_can_be_set_on_non_root_parent.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("CHILD_MAP_OK");
+		});
+
+		test("Override redirect window bypasses SubstructureRedirect", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"override_redirect_window_bypasses_substructureredirect.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("OR_MAP_OK");
+		});
+
+		test("ConfigureWindow works on override-redirect windows", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"configurewindow_works_on_override_redirect_windows.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("OR_CONFIGURE_OK");
+		});
 	});
 
-	test("Override redirect window bypasses SubstructureRedirect", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "override_redirect_window_bypasses_substructureredirect.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("OR_MAP_OK");
-	});
+test.describe
+	.serial("Window hierarchy events", () => {
+		test.setTimeout(60_000);
 
-	test("ConfigureWindow works on override-redirect windows", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "configurewindow_works_on_override_redirect_windows.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("OR_CONFIGURE_OK");
-	});
-});
+		test("StructureNotifyMask delivers MapNotify", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"structurenotifymask_delivers_mapnotify.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("MAP_NOTIFY_OK");
+		});
 
-test.describe.serial("Window hierarchy events", () => {
-	test.setTimeout(60_000);
+		test("SubstructureNotifyMask delivers CreateNotify", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"substructurenotifymask_delivers_createnotify.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("CREATE_NOTIFY_OK");
+		});
 
-	test("StructureNotifyMask delivers MapNotify", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "structurenotifymask_delivers_mapnotify.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("MAP_NOTIFY_OK");
-	});
+		test("DestroyNotify delivered when window destroyed", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"destroynotify_delivered_when_window_destroyed.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("DESTROY_NOTIFY_OK");
+		});
 
-	test("SubstructureNotifyMask delivers CreateNotify", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "substructurenotifymask_delivers_createnotify.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("CREATE_NOTIFY_OK");
-	});
+		test("ConfigureNotify sent after ConfigureWindow", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"configurenotify_sent_after_configurewindow.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("CONFIGURE_NOTIFY_OK");
+		});
 
-	test("DestroyNotify delivered when window destroyed", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "destroynotify_delivered_when_window_destroyed.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("DESTROY_NOTIFY_OK");
+		test("ReparentNotify sent on reparent", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"reparentnotify_sent_on_reparent.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("REPARENT_NOTIFY_OK");
+		});
 	});
-
-	test("ConfigureNotify sent after ConfigureWindow", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "configurenotify_sent_after_configurewindow.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("CONFIGURE_NOTIFY_OK");
-	});
-
-	test("ReparentNotify sent on reparent", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "reparentnotify_sent_on_reparent.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("REPARENT_NOTIFY_OK");
-	});
-});
 
 test.describe("Window geometry", () => {
-	test("GetGeometry and TranslateCoordinates round-trip", async ({ sidecarContainer }) => {
+	test("GetGeometry and TranslateCoordinates round-trip", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display, Xlib.X",
 				"d = Xlib.display.Display()",
 				"screen = d.screen()",
@@ -144,18 +221,31 @@ test.describe("Window geometry", () => {
 	});
 });
 
-test.describe.serial("Input handling edge cases", () => {
-	test("QueryPointer returns valid coordinates", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "querypointer_returns_valid_coordinates.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("pointer_ok=True");
-	});
+test.describe
+	.serial("Input handling edge cases", () => {
+		test("QueryPointer returns valid coordinates", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"querypointer_returns_valid_coordinates.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("pointer_ok=True");
+		});
 
-	test("TranslateCoordinates works between windows", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "translatecoordinates_works_between_windows.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("translate_ok=True");
+		test("TranslateCoordinates works between windows", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"translatecoordinates_works_between_windows.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("translate_ok=True");
+		});
 	});
-});

@@ -141,9 +141,7 @@ async function doSetup() {
 				// the browser uses. That keeps the OIDC issuer
 				// string identical on both sides — required for the
 				// `iss` claim check on the ID token.
-				.withExtraHosts([
-					{ host: "localhost", ipAddress: "host-gateway" },
-				])
+				.withExtraHosts([{ host: "localhost", ipAddress: "host-gateway" }])
 				// Mount the prebuilt frontend (produced by
 				// `global-setup.ts`) into the backend container so
 				// the backend's `ServeDir` fallback serves the SPA.
@@ -180,9 +178,7 @@ async function doSetup() {
 					OIDC_REDIRECT_URI: `http://localhost:${backendPort}/auth/callback`,
 					OIDC_POST_LOGIN_REDIRECT: `http://localhost:${backendPort}/`,
 				})
-				.withWaitStrategy(
-					Wait.forHttp("/health", 3001).forStatusCode(200),
-				)
+				.withWaitStrategy(Wait.forHttp("/health", 3001).forStatusCode(200))
 				// Reuse on worker respawn — keyed by image+env+network, all
 				// stable per worker — so we re-attach instead of leaking.
 				.withReuse();
@@ -192,9 +188,18 @@ async function doSetup() {
 			// port binding ourselves: the WebRTC DataChannel rides UDP,
 			// and without an explicit publish the browser on the host
 			// can't reach the container's UDP socket.
-			const hostConfig = (built as unknown as { hostConfig: Record<string, unknown> }).hostConfig;
-			const createOpts = (built as unknown as { createOpts: { ExposedPorts?: Record<string, object> } }).createOpts;
-			const portBindings = (hostConfig.PortBindings ?? {}) as Record<string, Array<{ HostPort: string }>>;
+			const hostConfig = (
+				built as unknown as { hostConfig: Record<string, unknown> }
+			).hostConfig;
+			const createOpts = (
+				built as unknown as {
+					createOpts: { ExposedPorts?: Record<string, object> };
+				}
+			).createOpts;
+			const portBindings = (hostConfig.PortBindings ?? {}) as Record<
+				string,
+				Array<{ HostPort: string }>
+			>;
 			portBindings[`${rtcUdpPort}/udp`] = [{ HostPort: String(rtcUdpPort) }];
 			hostConfig.PortBindings = portBindings;
 			createOpts.ExposedPorts = {
@@ -354,9 +359,9 @@ export async function spawnApp(
 	if (args) {
 		await page.locator('input[placeholder="args"]').fill(args);
 	}
-	await expect(
-		page.locator("button", { hasText: "Spawn" }),
-	).toBeEnabled({ timeout: 30_000 });
+	await expect(page.locator("button", { hasText: "Spawn" })).toBeEnabled({
+		timeout: 30_000,
+	});
 	await page.locator("button", { hasText: "Spawn" }).click();
 
 	await expect(windowFrames).toHaveCount(countBefore + 1, {
@@ -375,7 +380,9 @@ export async function spawnApp(
 	if (!newId) {
 		throw new Error("spawnApp: failed to identify newly spawned window frame");
 	}
-	return page.locator(`[data-testid="window-frame"][data-client-id="${newId}"]`);
+	return page.locator(
+		`[data-testid="window-frame"][data-client-id="${newId}"]`,
+	);
 }
 
 export async function waitForDock(page: Page) {

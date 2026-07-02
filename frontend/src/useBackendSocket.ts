@@ -118,7 +118,9 @@ export function useBackendSocket() {
 	const controlChannelRef = useRef<RTCDataChannel | null>(null);
 	const sendRef = useRef<(msg: FrontendToBackend) => void>(() => {});
 	const [connected, setConnected] = useState(false);
-	const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
+	const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(
+		null,
+	);
 	const activeWorkspaceIdRef = useRef<string | null>(null);
 	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
 
@@ -265,8 +267,7 @@ export function useBackendSocket() {
 				// one. The `Workspace` reply will set the hash if the
 				// backend assigned a different id (e.g. our hash was
 				// stale across a restart).
-				const requestedId =
-					window.location.hash.replace(/^#/, "") || null;
+				const requestedId = window.location.hash.replace(/^#/, "") || null;
 				sendRef.current({ type: "OpenWorkspace", id: requestedId });
 			};
 
@@ -419,7 +420,10 @@ export function useBackendSocket() {
 				// attributes so failures are filterable by category
 				// in OpenObserve, not just by red-status traces.
 				const message = `ws readyState=${wsRef.current?.readyState ?? "null"}`;
-				span.setAttributes({ "error.kind": "ws_not_open", "error.message": message });
+				span.setAttributes({
+					"error.kind": "ws_not_open",
+					"error.message": message,
+				});
 				span.setStatus({ code: SpanStatusCode.ERROR, message });
 				span.end();
 				return;
@@ -495,9 +499,7 @@ export function useWorkspaceName(workspaceId: string | null): string | null {
  *  Automerge doc; `useEffect`-listener pattern rather than
  *  `useSyncExternalStore` because Sets lack the referential
  *  stability the latter requires. */
-export function useAttachedWindowIds(
-	workspaceId: string | null,
-): Set<string> {
+export function useAttachedWindowIds(workspaceId: string | null): Set<string> {
 	const [snap, setSnap] = useState<Set<string>>(() =>
 		workspaceId ? getWindowNodeIds(workspaceId) : new Set(),
 	);
@@ -513,4 +515,3 @@ export function useAttachedWindowIds(
 	}, [workspaceId]);
 	return snap;
 }
-

@@ -11,7 +11,11 @@ async function execInSidecar(
 	cmd: string,
 	_timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
+	const result = await container.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; ${cmd}`,
+	]);
 	return result.output.trim();
 }
 
@@ -25,57 +29,89 @@ async function probe(
 	return result.output.trim();
 }
 
-test.describe.serial("Colormap operations", () => {
-	test("AllocColor returns correct RGB values", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "alloccolor_returns_correct_rgb_values.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("red_match=True");
-	});
-
-	test("AllocNamedColor resolves color names", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "allocnamedcolor_resolves_color_names.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("red_ok=True");
-		expect(output).toContain("blue_ok=True");
-	});
-});
-
-test.describe.serial("Multi-depth visual compliance", () => {
-	test("Server advertises 24-bit and 32-bit visuals", async ({
-		sidecarContainer,
-	}) => {
-		const output = await execInSidecar(
+test.describe
+	.serial("Colormap operations", () => {
+		test("AllocColor returns correct RGB values", async ({
 			sidecarContainer,
-			`xdpyinfo 2>&1 | grep 'depth' | head -5`,
-		);
-		expect(output).toContain("24");
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"alloccolor_returns_correct_rgb_values.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("red_match=True");
+		});
+
+		test("AllocNamedColor resolves color names", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"allocnamedcolor_resolves_color_names.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("red_ok=True");
+			expect(output).toContain("blue_ok=True");
+		});
 	});
 
-	test("PutImage and GetImage round-trip depth 24 ZPixmap", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "putimage_and_getimage_round_trip_depth_24_zpixmap.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("putget_test=ok");
-		expect(output).toContain("red_match=True");
-	});
+test.describe
+	.serial("Multi-depth visual compliance", () => {
+		test("Server advertises 24-bit and 32-bit visuals", async ({
+			sidecarContainer,
+		}) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				`xdpyinfo 2>&1 | grep 'depth' | head -5`,
+			);
+			expect(output).toContain("24");
+		});
 
-	test("CopyArea between windows", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "copyarea_between_windows.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("copy_area=ok");
-	});
+		test("PutImage and GetImage round-trip depth 24 ZPixmap", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"putimage_and_getimage_round_trip_depth_24_zpixmap.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("putget_test=ok");
+			expect(output).toContain("red_match=True");
+		});
 
-	test("Window colormap operations", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "window_colormap_operations.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("colormap_test=ok");
-		expect(output).toContain("alloc_red=65535");
-		expect(output).toContain("named_alloc=ok");
+		test("CopyArea between windows", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(sidecarContainer, "copyarea_between_windows.py", {
+					env: { DISPLAY: ":99" },
+				})
+			).output.trim();
+			expect(output).toContain("copy_area=ok");
+		});
+
+		test("Window colormap operations", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"window_colormap_operations.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("colormap_test=ok");
+			expect(output).toContain("alloc_red=65535");
+			expect(output).toContain("named_alloc=ok");
+		});
 	});
-});
 
 test.describe("Visual and depth support", () => {
-	test("xdpyinfo reports multiple depths (1, 4, 8, 16, 24, 32)", async ({ sidecarContainer }) => {
+	test("xdpyinfo reports multiple depths (1, 4, 8, 16, 24, 32)", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec(["xdpyinfo"]);
 		console.log(`xdpyinfo depths: exit=${result.exitCode}`);
 		// Check that multiple depths are advertised
@@ -86,44 +122,60 @@ test.describe("Visual and depth support", () => {
 		expect(result.output).toContain("depth 1");
 	});
 
-	test("xdpyinfo reports PseudoColor visual for depth 8", async ({ sidecarContainer }) => {
+	test("xdpyinfo reports PseudoColor visual for depth 8", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec(["xdpyinfo"]);
 		expect(result.output).toContain("PseudoColor");
 	});
 
-	test("xdpyinfo reports DirectColor visual for depth 24", async ({ sidecarContainer }) => {
+	test("xdpyinfo reports DirectColor visual for depth 24", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec(["xdpyinfo"]);
 		expect(result.output).toContain("DirectColor");
 	});
 
-	test("xdpyinfo reports all pixmap formats (1, 4, 8, 16, 24, 32)", async ({ sidecarContainer }) => {
+	test("xdpyinfo reports all pixmap formats (1, 4, 8, 16, 24, 32)", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec(["xdpyinfo"]);
 		// Check pixmap formats section
 		const lines = result.output.split("\n");
-		const formatLines = lines.filter((l: string) =>
-			l.includes("pixmap format") || (l.includes("depth") && l.includes("bits_per_pixel")),
+		const formatLines = lines.filter(
+			(l: string) =>
+				l.includes("pixmap format") ||
+				(l.includes("depth") && l.includes("bits_per_pixel")),
 		);
 		// Should have at least 6 pixmap formats
 		expect(formatLines.length).toBeGreaterThanOrEqual(6);
 	});
 });
 
-test.describe.serial("CopyColormapAndFree spec compliance", () => {
-	test.setTimeout(60_000);
+test.describe
+	.serial("CopyColormapAndFree spec compliance", () => {
+		test.setTimeout(60_000);
 
-	test("CopyColormapAndFree copies source and is usable", async ({
-		sidecarContainer,
-	}) => {
-		const output = await probe(sidecarContainer, "copycolormapandfree_usable.py");
-		expect(output).toContain("COPY_CMAP_OK");
+		test("CopyColormapAndFree copies source and is usable", async ({
+			sidecarContainer,
+		}) => {
+			const output = await probe(
+				sidecarContainer,
+				"copycolormapandfree_usable.py",
+			);
+			expect(output).toContain("COPY_CMAP_OK");
+		});
 	});
-});
 
 test.describe("Colormap operations", () => {
-	test("AllocColor and AllocNamedColor round-trip", async ({ sidecarContainer }) => {
+	test("AllocColor and AllocNamedColor round-trip", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"import Xlib, Xlib.display",
 				"d = Xlib.display.Display()",
 				"screen = d.screen()",
@@ -153,25 +205,38 @@ test.describe("Colormap operations", () => {
 	});
 });
 
-test.describe.serial("Colormap allocation", () => {
-	test.setTimeout(60_000);
+test.describe
+	.serial("Colormap allocation", () => {
+		test.setTimeout(60_000);
 
-	test("AllocColor on TrueColor colormap returns correct pixel", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "alloccolor_on_truecolor_colormap_returns_correct_pixel.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("ALLOC_COLOR_RED_OK");
-		expect(output).toContain("ALLOC_COLOR_BLUE_OK");
-	});
+		test("AllocColor on TrueColor colormap returns correct pixel", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"alloccolor_on_truecolor_colormap_returns_correct_pixel.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("ALLOC_COLOR_RED_OK");
+			expect(output).toContain("ALLOC_COLOR_BLUE_OK");
+		});
 
-	test("LookupColor resolves standard X11 color names", async ({
-		sidecarContainer,
-	}) => {
-		const output = (await runPythonScript(sidecarContainer, "lookupcolor_resolves_standard_x11_color_names.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("LOOKUP_RED_OK");
-		expect(output).toContain("LOOKUP_GREEN_OK");
-		expect(output).toContain("LOOKUP_BLUE_OK");
-		expect(output).toContain("LOOKUP_WHITE_OK");
-		expect(output).toContain("LOOKUP_BLACK_OK");
+		test("LookupColor resolves standard X11 color names", async ({
+			sidecarContainer,
+		}) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"lookupcolor_resolves_standard_x11_color_names.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("LOOKUP_RED_OK");
+			expect(output).toContain("LOOKUP_GREEN_OK");
+			expect(output).toContain("LOOKUP_BLUE_OK");
+			expect(output).toContain("LOOKUP_WHITE_OK");
+			expect(output).toContain("LOOKUP_BLACK_OK");
+		});
 	});
-});

@@ -56,10 +56,10 @@ export default function globalTeardown() {
 	// Drop the per-worker Docker networks created by fixtures.ts.
 	const networks = (() => {
 		try {
-			return execSync(
-				`docker network ls --filter "name=x11web-worker-" -q`,
-				{ encoding: "utf-8", timeout: 10_000 },
-			).trim();
+			return execSync(`docker network ls --filter "name=x11web-worker-" -q`, {
+				encoding: "utf-8",
+				timeout: 10_000,
+			}).trim();
 		} catch {
 			return "";
 		}

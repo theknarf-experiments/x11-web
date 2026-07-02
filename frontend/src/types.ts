@@ -133,11 +133,7 @@ export type WindowUpdate =
 // `GlobalMenuBar` consumes them). Re-export here so protocol-side
 // importers (db rows, `WindowUpdate.MenuStructure`, etc.) keep
 // pulling them from a single place.
-import type {
-	MenuAction,
-	MenuItem,
-	MenuItemKind,
-} from "@x11-web/components";
+import type { MenuAction, MenuItem, MenuItemKind } from "@x11-web/components";
 
 export type { MenuAction, MenuItem, MenuItemKind };
 

@@ -13,7 +13,12 @@ import {
 	x11Button,
 } from "./inputProtocol";
 
-const noMods = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
+const noMods = {
+	shiftKey: false,
+	ctrlKey: false,
+	altKey: false,
+	metaKey: false,
+};
 
 describe("browserKeyToX11Keycode", () => {
 	test.each([
@@ -37,9 +42,7 @@ describe("browserKeyToX11Keycode", () => {
 	});
 
 	test("returns 0 when both code and keyCode are missing", () => {
-		expect(
-			browserKeyToX11Keycode({ ...noMods, code: "", keyCode: 0 }),
-		).toBe(0);
+		expect(browserKeyToX11Keycode({ ...noMods, code: "", keyCode: 0 })).toBe(0);
 	});
 
 	test("prefers code mapping over keyCode fallback", () => {
@@ -219,9 +222,11 @@ describe("mouseUpToInput", () => {
 
 describe("keyDownToInput / keyUpToInput", () => {
 	test("emits KeyPress for a mapped code", () => {
-		expect(
-			keyDownToInput({ ...noMods, code: "KeyA", keyCode: 65 }),
-		).toEqual({ kind: "KeyPress", keycode: 38, state: 0 });
+		expect(keyDownToInput({ ...noMods, code: "KeyA", keyCode: 65 })).toEqual({
+			kind: "KeyPress",
+			keycode: 38,
+			state: 0,
+		});
 	});
 
 	test("packs modifier mask onto KeyPress", () => {
@@ -236,15 +241,15 @@ describe("keyDownToInput / keyUpToInput", () => {
 	});
 
 	test("emits KeyRelease for a mapped code", () => {
-		expect(
-			keyUpToInput({ ...noMods, code: "Enter", keyCode: 13 }),
-		).toEqual({ kind: "KeyRelease", keycode: 36, state: 0 });
+		expect(keyUpToInput({ ...noMods, code: "Enter", keyCode: 13 })).toEqual({
+			kind: "KeyRelease",
+			keycode: 36,
+			state: 0,
+		});
 	});
 
 	test("returns null when the key is unmappable", () => {
-		expect(
-			keyDownToInput({ ...noMods, code: "", keyCode: 0 }),
-		).toBeNull();
+		expect(keyDownToInput({ ...noMods, code: "", keyCode: 0 })).toBeNull();
 		expect(keyUpToInput({ ...noMods, code: "", keyCode: 0 })).toBeNull();
 	});
 

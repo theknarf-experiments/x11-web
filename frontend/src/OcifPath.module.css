@@ -16,7 +16,6 @@
  * than hover so the two states are distinct. */
 .selected .hitPath,
 .selected .hitPath:hover {
-	filter:
-		drop-shadow(0 0 1px #007aff)
+	filter: drop-shadow(0 0 1px #007aff)
 		drop-shadow(0 0 5px rgba(0, 122, 255, 0.7));
 }

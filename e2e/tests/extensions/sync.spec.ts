@@ -11,44 +11,71 @@ async function execInSidecar(
 	cmd: string,
 	_timeoutMs = 30_000,
 ): Promise<string> {
-	const result = await container.exec(["bash", "-c", `export DISPLAY=:99; ${cmd}`]);
+	const result = await container.exec([
+		"bash",
+		"-c",
+		`export DISPLAY=:99; ${cmd}`,
+	]);
 	return result.output.trim();
 }
 
-test.describe.serial("SYNC extension compliance", () => {
-	test("SYNC extension is present", async ({ sidecarContainer }) => {
-		const output = await execInSidecar(
-			sidecarContainer,
-			`xdpyinfo 2>/dev/null | grep SYNC`,
-		);
-		expect(output).toContain("SYNC");
-	});
+test.describe
+	.serial("SYNC extension compliance", () => {
+		test("SYNC extension is present", async ({ sidecarContainer }) => {
+			const output = await execInSidecar(
+				sidecarContainer,
+				`xdpyinfo 2>/dev/null | grep SYNC`,
+			);
+			expect(output).toContain("SYNC");
+		});
 
-	test("SYNC counters can be listed", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "sync_counters_can_be_listed.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("sync_present=true");
+		test("SYNC counters can be listed", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"sync_counters_can_be_listed.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("sync_present=true");
+		});
 	});
-});
 
 test.describe("SYNC extension conformance", () => {
-	test("SYNC counters and alarms via python3-xlib", async ({ sidecarContainer }) => {
+	test("SYNC counters and alarms via python3-xlib", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "sync_counters_alarms_python_xlib.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"sync_counters_alarms_python_xlib.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		expect(result.output).toContain("PASS");
 	});
 });
 
 test.describe("SYNC extension fence operations", () => {
-	test("SYNC extension version and counter operations", async ({ sidecarContainer }) => {
-		const result = await runPythonScript(sidecarContainer, "sync_extension_version_counters.py", { env: { DISPLAY: ":99" } });
+	test("SYNC extension version and counter operations", async ({
+		sidecarContainer,
+	}) => {
+		const result = await runPythonScript(
+			sidecarContainer,
+			"sync_extension_version_counters.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		expect(result.output).toContain("PASS: SYNC extension available");
 	});
 });
 
 test.describe("SYNC fence operations", () => {
-	test("SYNC CreateFence + TriggerFence + QueryFence works", async ({ sidecarContainer }) => {
+	test("SYNC CreateFence + TriggerFence + QueryFence works", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
-			"python3", "-c", [
+			"python3",
+			"-c",
+			[
 				"from Xlib import X, display",
 				"d = display.Display()",
 				"sync_ext = d.query_extension('SYNC')",
@@ -62,15 +89,24 @@ test.describe("SYNC fence operations", () => {
 	});
 });
 
-test.describe.serial("SYNC extension (Phase 7)", () => {
-	test("SYNC extension is present", async ({ sidecarContainer }) => {
-		const output = (await runPythonScript(sidecarContainer, "sync_extension_is_present.py", { env: { DISPLAY: ":99" } })).output.trim();
-		expect(output).toContain("sync_present=True");
+test.describe
+	.serial("SYNC extension (Phase 7)", () => {
+		test("SYNC extension is present", async ({ sidecarContainer }) => {
+			const output = (
+				await runPythonScript(
+					sidecarContainer,
+					"sync_extension_is_present.py",
+					{ env: { DISPLAY: ":99" } },
+				)
+			).output.trim();
+			expect(output).toContain("sync_present=True");
+		});
 	});
-});
 
 test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fences", () => {
-	test("background pixmap attribute is accepted in ChangeWindowAttributes", async ({ sidecarContainer }) => {
+	test("background pixmap attribute is accepted in ChangeWindowAttributes", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"python3",
 			"-c",
@@ -98,7 +134,9 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		expect(result.output).toContain("BG_PIXMAP_OK");
 	});
 
-	test("VisibilityNotify is sent on MapWindow", async ({ sidecarContainer }) => {
+	test("VisibilityNotify is sent on MapWindow", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"python3",
 			"-c",
@@ -135,7 +173,9 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		expect(result.output).toContain("VISIBILITY_OK");
 	});
 
-	test("AllowEvents SyncPointer mode re-freezes correctly", async ({ sidecarContainer }) => {
+	test("AllowEvents SyncPointer mode re-freezes correctly", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"python3",
 			"-c",
@@ -167,7 +207,9 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		expect(result.output).toContain("SYNC_GRAB_OK");
 	});
 
-	test("SYNC extension fences can be created and queried", async ({ sidecarContainer }) => {
+	test("SYNC extension fences can be created and queried", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"python3",
 			"-c",
@@ -194,7 +236,9 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		expect(result.output).toContain("SYNC_EXT_OK");
 	});
 
-	test("window stacking changes emit VisibilityNotify to affected siblings", async ({ sidecarContainer }) => {
+	test("window stacking changes emit VisibilityNotify to affected siblings", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"python3",
 			"-c",
@@ -234,7 +278,9 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		expect(result.output).toContain("STACKING_VISIBILITY_OK");
 	});
 
-	test("GLX extension reports WaitGL/WaitX support", async ({ sidecarContainer }) => {
+	test("GLX extension reports WaitGL/WaitX support", async ({
+		sidecarContainer,
+	}) => {
 		const result = await sidecarContainer.exec([
 			"python3",
 			"-c",
@@ -252,65 +298,119 @@ test.describe("Phase 8: Background pixmap, VisibilityNotify, grab sync, DRI3 fen
 		expect(result.output).toContain("GLX_FOUND");
 	});
 
-	test("cross-connection PropertyNotify delivery", async ({ sidecarContainer }) => {
+	test("cross-connection PropertyNotify delivery", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "cross_connection_propertynotify.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"cross_connection_propertynotify.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`Cross-connection PropertyNotify: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 
-	test("cross-connection SubstructureNotify delivery", async ({ sidecarContainer }) => {
+	test("cross-connection SubstructureNotify delivery", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "cross_connection_substructurenotify.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"cross_connection_substructurenotify.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`Cross-connection SubstructureNotify: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 
-	test("EWMH _NET_WM_STATE toggle via ClientMessage", async ({ sidecarContainer }) => {
+	test("EWMH _NET_WM_STATE toggle via ClientMessage", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "ewmh_net_wm_state_toggle_clientmessage.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"ewmh_net_wm_state_toggle_clientmessage.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`EWMH _NET_WM_STATE toggle: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 
-	test("all event mask bits are correctly defined", async ({ sidecarContainer }) => {
+	test("all event mask bits are correctly defined", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "all_event_mask_bits_defined.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"all_event_mask_bits_defined.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`Event masks: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 
-	test("WM_CHANGE_STATE IconicState request works", async ({ sidecarContainer }) => {
+	test("WM_CHANGE_STATE IconicState request works", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "wm_change_state_iconic_request.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"wm_change_state_iconic_request.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`WM_CHANGE_STATE: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 
-	test("ResizeRedirectMask is accepted in event mask", async ({ sidecarContainer }) => {
+	test("ResizeRedirectMask is accepted in event mask", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "resizeredirectmask_event_mask.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"resizeredirectmask_event_mask.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`ResizeRedirectMask: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 
-	test("ColormapNotify is broadcast cross-connection", async ({ sidecarContainer }) => {
+	test("ColormapNotify is broadcast cross-connection", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "colormapnotify_cross_connection.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"colormapnotify_cross_connection.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`ColormapNotify broadcast: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 
-	test("ExposureMask events are broadcast cross-connection", async ({ sidecarContainer }) => {
+	test("ExposureMask events are broadcast cross-connection", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "exposuremask_cross_connection.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"exposuremask_cross_connection.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`ExposureMask broadcast: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
 
-	test("MappingNotify broadcast to all clients", async ({ sidecarContainer }) => {
+	test("MappingNotify broadcast to all clients", async ({
+		sidecarContainer,
+	}) => {
 		test.setTimeout(30_000);
-		const result = await runPythonScript(sidecarContainer, "mappingnotify_broadcast_clients.py", { env: { DISPLAY: ":99" } });
+		const result = await runPythonScript(
+			sidecarContainer,
+			"mappingnotify_broadcast_clients.py",
+			{ env: { DISPLAY: ":99" } },
+		);
 		console.log(`MappingNotify broadcast: ${result.output}`);
 		expect(result.output).toContain("PASS");
 	});
