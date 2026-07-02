@@ -1,4 +1,4 @@
-import type { Preview } from "@storybook/react";
+import type { Preview } from "@storybook/react-vite";
 
 const preview: Preview = {
 	parameters: {
@@ -17,6 +17,9 @@ const preview: Preview = {
 			test: "error",
 		},
 	},
+	// `@storybook/addon-docs`: generate an autodocs page per component.
+	// Test-only story files opt out with `tags: ["!autodocs"]`.
+	tags: ["autodocs"],
 };
 
 export default preview;
