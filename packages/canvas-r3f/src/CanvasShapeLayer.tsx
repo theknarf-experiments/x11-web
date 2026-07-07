@@ -1,8 +1,10 @@
 import { Canvas } from "@react-three/fiber";
 import type { CameraStore } from "@x11-web/canvas-core";
 import type { CSSProperties } from "react";
+import { Arrows } from "./Arrows.tsx";
 import { Boxes } from "./Boxes.tsx";
 import { CAMERA_Z, CameraRig } from "./CameraRig.tsx";
+import { Paths } from "./Paths.tsx";
 import type { ShapeArrow, ShapeBox, ShapePath } from "./types.ts";
 
 export interface CanvasShapeLayerProps {
@@ -46,9 +48,8 @@ export function CanvasShapeLayer({
 		>
 			<CameraRig store={camera} />
 			{boxes && boxes.length > 0 && <Boxes boxes={boxes} camera={camera} />}
-			{/* paths / arrows land in the next slice */}
-			{paths?.length ? null : null}
-			{arrows?.length ? null : null}
+			{paths && paths.length > 0 && <Paths paths={paths} />}
+			{arrows && arrows.length > 0 && <Arrows arrows={arrows} />}
 		</Canvas>
 	);
 }

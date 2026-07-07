@@ -1,6 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { createCameraStore } from "@x11-web/canvas-core";
-import { CanvasShapeLayer, type ShapeBox } from "@x11-web/canvas-r3f";
+import { createCameraStore, sampleQuadratic } from "@x11-web/canvas-core";
+import {
+	CanvasShapeLayer,
+	type ShapeArrow,
+	type ShapeBox,
+	type ShapePath,
+} from "@x11-web/canvas-r3f";
 import { useMemo } from "react";
 import { InfiniteCanvas } from "./InfiniteCanvas.tsx";
 
@@ -91,12 +96,76 @@ const BOXES: ShapeBox[] = [
 	},
 ];
 
+/** Wobbly ink-blob outline standing in for a perfect-freehand
+ *  stroke polygon. */
+function blobOutline(
+	cx: number,
+	cy: number,
+	steps = 48,
+): Array<readonly [number, number]> {
+	const pts: Array<readonly [number, number]> = [];
+	for (let i = 0; i < steps; i++) {
+		const t = (i / steps) * Math.PI * 2;
+		const wobble = 1 + 0.35 * Math.sin(t * 3 + 1) + 0.15 * Math.sin(t * 7);
+		pts.push([
+			cx + Math.cos(t) * 55 * wobble + t * 22,
+			cy + Math.sin(t) * 26 * wobble,
+		]);
+	}
+	return pts;
+}
+
+const PATHS: ShapePath[] = [
+	{ id: "ink", z: 7, outline: blobOutline(160, 480), fill: "#ffffff" },
+];
+
+function arrowBetween(
+	id: string,
+	z: number,
+	sx: number,
+	sy: number,
+	cx: number,
+	cy: number,
+	ex: number,
+	ey: number,
+	stroke: string,
+): ShapeArrow {
+	const polyline = sampleQuadratic(sx, sy, cx, cy, ex, ey);
+	return {
+		id,
+		z,
+		polyline,
+		stroke,
+		strokeWidth: 2,
+		heads: [
+			{
+				x: ex,
+				y: ey,
+				angle: Math.atan2(ey - cy, ex - cx),
+				size: 12,
+			},
+		],
+	};
+}
+
+const ARROWS: ShapeArrow[] = [
+	arrowBetween("a1", 8, 280, 190, 400, 260, 540, 190, "#ffffff"),
+	arrowBetween("a2", 9, 460, 480, 620, 560, 740, 350, "#cc6677"),
+];
+
 function Host() {
 	const store = useMemo(() => createCameraStore(), []);
 	return (
 		<InfiniteCanvas
 			cameraStore={store}
-			underlay={<CanvasShapeLayer camera={store} boxes={BOXES} />}
+			underlay={
+				<CanvasShapeLayer
+					camera={store}
+					boxes={BOXES}
+					paths={PATHS}
+					arrows={ARROWS}
+				/>
+			}
 		>
 			{/* DOM reference: same geometry as the "plain" GL box, drawn
 			    with the border technique — should sit exactly on top of
