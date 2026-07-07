@@ -1,15 +1,34 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+	type CameraStore,
+	createCameraStore,
+	PinchTracker,
+	panBy,
+	viewportToCanvas,
+	wheelIntent,
+	zoomAt,
+} from "@x11-web/canvas-core";
+import {
+	type ReactNode,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { Popover } from "../Popover/Popover.tsx";
 import s from "./InfiniteCanvas.module.css";
 
-interface Camera {
-	x: number;
-	y: number;
-	scale: number;
-}
-
 interface InfiniteCanvasProps {
 	children: ReactNode;
+	/// Rendered beneath the transform layer, filling the viewport —
+	/// e.g. a GL shape layer following the same camera via the shared
+	/// store. Pointer events pass through to the canvas.
+	underlay?: ReactNode;
+	/// External camera store (`createCameraStore()` from
+	/// `@x11-web/canvas-core`). Pass one when another renderer needs
+	/// to follow the same camera; omitted, the canvas owns a private
+	/// store internally.
+	cameraStore?: CameraStore;
 	/// Called on drop with the drop point already translated into
 	/// canvas coordinates (camera-aware). Used to land dragged
 	/// polaroids onto the canvas at the cursor.
@@ -35,22 +54,24 @@ interface InfiniteCanvasProps {
 	>;
 }
 
-const MIN_SCALE = 0.1;
-const MAX_SCALE = 3;
 const ZOOM_PRESETS = [0.25, 0.5, 0.75, 1, 1.5, 2];
 
 export function InfiniteCanvas({
 	children,
+	underlay,
+	cameraStore,
 	onCanvasDrop,
 	onCanvasPointerDown,
 	pageToCanvasRef,
 }: InfiniteCanvasProps) {
-	const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, scale: 1 });
-	const cameraRef = useRef(camera);
-	cameraRef.current = camera;
+	const internalStore = useMemo(() => createCameraStore(), []);
+	const store = cameraStore ?? internalStore;
+	const storeRef = useRef(store);
+	storeRef.current = store;
+	const camera = useSyncExternalStore(store.subscribe, store.get);
 	const viewportRef = useRef<HTMLDivElement>(null);
 
-	// True while a wheel pan/zoom gesture is in flight. Drives
+	// True while a wheel/pinch gesture is in flight. Drives
 	// `will-change: transform` on the transform layer: promoted to a
 	// compositor layer only *during* the gesture (smooth motion), then
 	// demoted once it settles so the browser re-rasterizes vectors and
@@ -67,68 +88,82 @@ export function InfiniteCanvas({
 		const el = viewportRef.current;
 		if (!el) return;
 		const rect = el.getBoundingClientRect();
-		const cam = cameraRef.current;
-		const cx = rect.width / 2;
-		const cy = rect.height / 2;
-		const canvasX = cam.x + cx / cam.scale;
-		const canvasY = cam.y + cy / cam.scale;
-		setCamera({
-			x: canvasX - cx / newScale,
-			y: canvasY - cy / newScale,
-			scale: newScale,
-		});
+		const st = storeRef.current;
+		st.set(zoomAt(st.get(), rect.width / 2, rect.height / 2, newScale));
 	};
 
-	// Wheel: scroll = pan, cmd+scroll or pinch = zoom
-	// Use a native event listener to get { passive: false } for preventDefault
+	// Wheel: scroll = pan, cmd+scroll or pinch = zoom (trackpad pinch
+	// fires as ctrl+wheel). Touch: two-pointer pinch zoom. Native
+	// listeners for `{ passive: false }` preventDefault on wheel; the
+	// touch listeners only observe, so children keep their events.
 	useEffect(() => {
 		const el = viewportRef.current;
 		if (!el) return;
 
 		let settleTimer: number | null = null;
-
-		const onWheel = (e: WheelEvent) => {
-			e.preventDefault();
-			const cam = cameraRef.current;
-
+		const markGesture = () => {
 			setGestureActive(true);
 			if (settleTimer !== null) clearTimeout(settleTimer);
 			settleTimer = window.setTimeout(() => {
 				settleTimer = null;
 				setGestureActive(false);
 			}, 150);
+		};
 
-			if (e.ctrlKey || e.metaKey) {
-				// Zoom (cmd+scroll or pinch-to-zoom — trackpad pinch fires as ctrlKey+wheel)
-				const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05;
-				const newScale = Math.min(
-					MAX_SCALE,
-					Math.max(MIN_SCALE, cam.scale * zoomFactor),
-				);
-
+		const onWheel = (e: WheelEvent) => {
+			e.preventDefault();
+			markGesture();
+			const st = storeRef.current;
+			const cam = st.get();
+			const intent = wheelIntent(e);
+			if (intent.type === "zoom") {
 				const rect = el.getBoundingClientRect();
-				const cursorX = e.clientX - rect.left;
-				const cursorY = e.clientY - rect.top;
-
-				const canvasX = cam.x + cursorX / cam.scale;
-				const canvasY = cam.y + cursorY / cam.scale;
-				const newX = canvasX - cursorX / newScale;
-				const newY = canvasY - cursorY / newScale;
-
-				setCamera({ x: newX, y: newY, scale: newScale });
+				st.set(
+					zoomAt(
+						cam,
+						e.clientX - rect.left,
+						e.clientY - rect.top,
+						cam.scale * intent.factor,
+					),
+				);
 			} else {
-				// Pan (regular scroll)
-				setCamera({
-					...cam,
-					x: cam.x + e.deltaX / cam.scale,
-					y: cam.y + e.deltaY / cam.scale,
-				});
+				st.set(panBy(cam, intent.dx, intent.dy));
 			}
 		};
 
+		const pinch = new PinchTracker();
+		const onPointerDown = (e: PointerEvent) => pinch.down(e);
+		const onPointerMove = (e: PointerEvent) => {
+			const update = pinch.move(e);
+			if (!update) return;
+			markGesture();
+			const rect = el.getBoundingClientRect();
+			const st = storeRef.current;
+			const cam = st.get();
+			st.set(
+				zoomAt(
+					cam,
+					update.midX - rect.left,
+					update.midY - rect.top,
+					cam.scale * update.factor,
+				),
+			);
+		};
+		const onPointerEnd = (e: PointerEvent) => pinch.up(e.pointerId);
+
 		el.addEventListener("wheel", onWheel, { passive: false });
+		el.addEventListener("pointerdown", onPointerDown);
+		// Move/up on window: pinching fingers routinely wander off the
+		// viewport mid-gesture.
+		window.addEventListener("pointermove", onPointerMove);
+		window.addEventListener("pointerup", onPointerEnd);
+		window.addEventListener("pointercancel", onPointerEnd);
 		return () => {
 			el.removeEventListener("wheel", onWheel);
+			el.removeEventListener("pointerdown", onPointerDown);
+			window.removeEventListener("pointermove", onPointerMove);
+			window.removeEventListener("pointerup", onPointerEnd);
+			window.removeEventListener("pointercancel", onPointerEnd);
 			if (settleTimer !== null) clearTimeout(settleTimer);
 		};
 	}, []);
@@ -150,12 +185,12 @@ export function InfiniteCanvas({
 				const el = viewportRef.current;
 				if (!el) return;
 				const rect = el.getBoundingClientRect();
-				const cam = cameraRef.current;
-				const cursorX = e.clientX - rect.left;
-				const cursorY = e.clientY - rect.top;
-				const canvasX = cam.x + cursorX / cam.scale;
-				const canvasY = cam.y + cursorY / cam.scale;
-				onCanvasDrop({ x: canvasX, y: canvasY }, e);
+				const point = viewportToCanvas(
+					storeRef.current.get(),
+					e.clientX - rect.left,
+					e.clientY - rect.top,
+				);
+				onCanvasDrop(point, e);
 			}
 		: undefined;
 
@@ -168,11 +203,11 @@ export function InfiniteCanvas({
 			const el = viewportRef.current;
 			if (!el) return { x: clientX, y: clientY };
 			const rect = el.getBoundingClientRect();
-			const cam = cameraRef.current;
-			return {
-				x: cam.x + (clientX - rect.left) / cam.scale,
-				y: cam.y + (clientY - rect.top) / cam.scale,
-			};
+			return viewportToCanvas(
+				storeRef.current.get(),
+				clientX - rect.left,
+				clientY - rect.top,
+			);
 		};
 	}
 
@@ -186,11 +221,12 @@ export function InfiniteCanvas({
 				const el = viewportRef.current;
 				if (!el) return;
 				const rect = el.getBoundingClientRect();
-				const cam = cameraRef.current;
-				const cursorX = e.clientX - rect.left;
-				const cursorY = e.clientY - rect.top;
 				onCanvasPointerDown(
-					{ x: cam.x + cursorX / cam.scale, y: cam.y + cursorY / cam.scale },
+					viewportToCanvas(
+						storeRef.current.get(),
+						e.clientX - rect.left,
+						e.clientY - rect.top,
+					),
 					e,
 				);
 			}
@@ -205,6 +241,7 @@ export function InfiniteCanvas({
 			onDrop={handleDrop}
 			onPointerDown={handlePointerDown}
 		>
+			{underlay && <div className={s.underlay}>{underlay}</div>}
 			<div
 				className={s.transform}
 				style={{

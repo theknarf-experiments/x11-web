@@ -150,6 +150,9 @@ importers:
 
   packages/components:
     dependencies:
+      '@x11-web/canvas-core':
+        specifier: workspace:*
+        version: link:../canvas-core
       react:
         specifier: 19.3.0-canary-3cb2c420-20260324
         version: 19.3.0-canary-3cb2c420-20260324

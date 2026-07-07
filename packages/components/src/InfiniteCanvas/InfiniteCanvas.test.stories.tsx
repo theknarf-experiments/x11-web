@@ -158,6 +158,48 @@ export const ZoomIndicatorPresetSnaps: Story = {
 	},
 };
 
+/** Two-finger touch pinch zooms around the midpoint. Touch pointers
+ *  are tracked by the canvas-core PinchTracker; spreading the
+ *  fingers apart scales up. */
+export const TouchPinchZooms: Story = {
+	args: {},
+	play: async ({ canvasElement }) => {
+		const viewport = within(canvasElement).getByTestId("infinite-canvas");
+		const transformLayer = viewport.querySelector(
+			"[data-canvas-scale]",
+		) as HTMLElement;
+		const rect = viewport.getBoundingClientRect();
+		const touch = (
+			type: string,
+			pointerId: number,
+			x: number,
+			y: number,
+		): PointerEvent =>
+			new PointerEvent(type, {
+				bubbles: true,
+				pointerId,
+				pointerType: "touch",
+				clientX: rect.left + x,
+				clientY: rect.top + y,
+			});
+
+		viewport.dispatchEvent(touch("pointerdown", 11, 100, 100));
+		viewport.dispatchEvent(touch("pointerdown", 12, 200, 100));
+		// Spread: finger 12 moves from 100px to 200px away.
+		window.dispatchEvent(touch("pointermove", 12, 300, 100));
+
+		await waitFor(() => {
+			const scale = parseFloat(
+				transformLayer.getAttribute("data-canvas-scale") ?? "1",
+			);
+			expect(scale).toBeCloseTo(2, 1);
+		});
+
+		window.dispatchEvent(touch("pointerup", 11, 100, 100));
+		window.dispatchEvent(touch("pointerup", 12, 300, 100));
+	},
+};
+
 /** `will-change: transform` is applied only while a wheel gesture
  *  is in flight and dropped once it settles. Leaving it on
  *  permanently keeps the whole canvas on one cached compositor
