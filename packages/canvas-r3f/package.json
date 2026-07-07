@@ -1,0 +1,28 @@
+{
+	"name": "@x11-web/canvas-r3f",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@react-three/fiber": "^9.6.1",
+		"@x11-web/canvas-core": "workspace:*",
+		"three": "^0.185.1"
+	},
+	"peerDependencies": {
+		"react": ">=19",
+		"react-dom": ">=19"
+	},
+	"devDependencies": {
+		"@types/react": "19.2.14",
+		"@types/three": "^0.185.0",
+		"typescript": "catalog:",
+		"vitest": "^4.1.5"
+	}
+}
