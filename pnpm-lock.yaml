@@ -139,6 +139,15 @@ importers:
         specifier: ^4.1.5
         version: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(@vitest/browser-playwright@4.1.5)(jsdom@29.1.1)(vite@6.4.1(@types/node@24.12.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.8.3))
 
+  packages/canvas-core:
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@24.12.0)(@vitest/browser-playwright@4.1.5)(jsdom@29.1.1)(vite@8.0.8(@types/node@24.12.0)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.3))
+
   packages/components:
     dependencies:
       react:
