@@ -210,6 +210,7 @@ fn xi_pointer_event_parses_back() {
     let bytes = build_xi_pointer_event(
         xi::BUTTON_PRESS_EVENT,
         123,
+        0, // time
         5, // detail = scroll-down button
         MASTER_POINTER_ID,
         MASTER_POINTER_ID,
@@ -251,7 +252,7 @@ fn build_xi_events_for_emits_device_event_on_matching_window() {
         y: 200,
         state: 0,
     };
-    let events = build_xi_events_for(&mut valuators, &selections, &[], &chain, 5, 0x62, &input, false);
+    let events = build_xi_events_for(&mut valuators, &selections, &[], &chain, 5, 0, 0x62, &input, false);
     assert_eq!(events.len(), 1);
     let (event, _) = xi::ButtonPressEvent::try_parse(&events[0]).unwrap();
     assert_eq!(event.event, 0x40_0001);
@@ -274,7 +275,7 @@ fn build_xi_events_for_emits_raw_motion_for_root_subscription() {
         y: 60,
         state: 0,
     };
-    let events = build_xi_events_for(&mut valuators, &selections, &[], &chain, 9, root, &input, false);
+    let events = build_xi_events_for(&mut valuators, &selections, &[], &chain, 9, 0, root, &input, false);
     assert_eq!(events.len(), 1);
     let (raw, _) = xi::RawButtonPressEvent::try_parse(&events[0]).unwrap();
     assert_eq!(raw.event_type, xi::RAW_MOTION_EVENT);
@@ -299,7 +300,7 @@ fn scroll_button_press_emits_motion_with_valuator_update() {
         y: 200,
         state: 0,
     };
-    let events = build_xi_events_for(&mut valuators, &selections, &[], &chain, 5, 0x62, &input, false);
+    let events = build_xi_events_for(&mut valuators, &selections, &[], &chain, 5, 0, 0x62, &input, false);
     assert_eq!(events.len(), 1);
     let (event, _) = xi::ButtonPressEvent::try_parse(&events[0]).unwrap();
     assert_eq!(event.event_type, xi::MOTION_EVENT);
@@ -327,7 +328,7 @@ fn scroll_button_release_is_suppressed() {
         y: 0,
         state: 0,
     };
-    let events = build_xi_events_for(&mut valuators, &selections, &[], &chain, 5, 0x62, &input, false);
+    let events = build_xi_events_for(&mut valuators, &selections, &[], &chain, 5, 0, 0x62, &input, false);
     assert!(
         events.is_empty(),
         "scroll-button release shouldn't emit a second motion event"
@@ -425,7 +426,7 @@ fn build_xi_events_for_returns_empty_without_subscription() {
         state: 0,
     };
     assert!(
-        build_xi_events_for(&mut valuators, &selections, &[], &chain, 0, 0x62, &input, false).is_empty()
+        build_xi_events_for(&mut valuators, &selections, &[], &chain, 0, 0, 0x62, &input, false).is_empty()
     );
 }
 

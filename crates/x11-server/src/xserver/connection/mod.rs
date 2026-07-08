@@ -1405,12 +1405,14 @@ pub(crate) async fn handle_client(
                                                 stream.write_all(&event_bytes).await?;
                                             }
                                             let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let ts = state.timestamp();
                                             let xi_evts = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
                                                 &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
+                                                ts,
                                                 state.root_window,
                                                 &motion,
                                                 state.msb_first,
@@ -1434,12 +1436,14 @@ pub(crate) async fn handle_client(
                                                 stream.write_all(&event_bytes).await?;
                                             }
                                             let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let ts = state.timestamp();
                                             let xi_evts = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
                                                 &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
+                                                ts,
                                                 state.root_window,
                                                 &press,
                                                 state.msb_first,
@@ -1549,12 +1553,14 @@ pub(crate) async fn handle_client(
                                                 stream.write_all(&event_bytes).await?;
                                             }
                                             let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let ts = state.timestamp();
                                             let xi_evts = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
                                                 &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
+                                                ts,
                                                 state.root_window,
                                                 &release,
                                                 state.msb_first,
@@ -1634,12 +1640,14 @@ pub(crate) async fn handle_client(
 
                                             // XI2 events with the Unicode keysym
                                             let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let ts = state.timestamp();
                                             let xi_press = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
                                                 &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
+                                                ts,
                                                 state.root_window,
                                                 &synth_press,
                                                 state.msb_first,
@@ -1647,12 +1655,14 @@ pub(crate) async fn handle_client(
                                             for ev in xi_press {
                                                 stream.write_all(&ev).await?;
                                             }
+                                            let ts = state.timestamp();
                                             let xi_release = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
                                                 &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
+                                                ts,
                                                 state.root_window,
                                                 &synth_release,
                                                 state.msb_first,
@@ -1680,12 +1690,14 @@ pub(crate) async fn handle_client(
                                                 stream.write_all(&bytes).await?;
                                             }
                                             let chain = ancestor_chain(&state.windows, x11_wid);
+                                            let ts = state.timestamp();
                                             let xi_evts = crate::xinput2::build_xi_events_for(
                                                 &mut state.xi.valuators,
                                                 &state.xi.selections,
                                                 &state.xi.passive_grabs,
                                                 &chain,
                                                 state.sequence,
+                                                ts,
                                                 state.root_window,
                                                 &replay,
                                                 state.msb_first,
@@ -1763,7 +1775,6 @@ pub(crate) async fn handle_client(
                                 }
                                 _ => input,
                             };
-                            tracing::debug!("frontend-input win={x11_wid:#x} {input:?}");
                             // Crossing events: when this pointer event lands
                             // in a different window than the pointer was
                             // last in, emit core Enter/Leave and XI2
@@ -1795,38 +1806,15 @@ pub(crate) async fn handle_client(
                                     let root_y = (off_y + *y as i32)
                                         .clamp(i16::MIN as i32, i16::MAX as i32)
                                         as i16;
-                                    // Core crossings (also updates
+                                    // Core + XI2 crossings in one buffer
+                                    // (build_crossing_events appends the
+                                    // XI2 ones and updates
                                     // last_entered_window).
                                     let crossings = build_crossing_events(
                                         &mut state, deepest, root_x, root_y, local_x, local_y,
                                     );
                                     if !crossings.is_empty() {
                                         stream.write_all(&crossings).await?;
-                                    }
-                                    // XI2 crossings for selections along the
-                                    // leave/enter ancestor chains.
-                                    let leave_chain = ancestor_chain(&state.windows, prev);
-                                    let enter_chain = ancestor_chain(&state.windows, deepest);
-                                    let xi_crossings =
-                                        crate::xinput2::build_xi_crossing_events_for(
-                                            &state.xi.selections,
-                                            &leave_chain,
-                                            &enter_chain,
-                                            root_x,
-                                            root_y,
-                                            local_x,
-                                            local_y,
-                                            state.sequence,
-                                            state.root_window,
-                                            state.msb_first,
-                                        );
-                                    tracing::debug!(
-                                        "crossing: prev={prev:#x} -> deepest={deepest:#x} core_bytes={} xi_events={} enter_chain={enter_chain:x?}",
-                                        crossings.len(),
-                                        xi_crossings.len(),
-                                    );
-                                    for ev in xi_crossings {
-                                        stream.write_all(&ev).await?;
                                     }
                                 }
                             }
@@ -1969,12 +1957,14 @@ pub(crate) async fn handle_client(
                                 _ => x11_wid,
                             };
                             let chain = ancestor_chain(&state.windows, xi_start);
+                            let ts = state.timestamp();
                             let xi_events = crate::xinput2::build_xi_events_for(
                                 &mut state.xi.valuators,
                                 &state.xi.selections,
                                 &state.xi.passive_grabs,
                                 &chain,
                                 state.sequence,
+                                ts,
                                 state.root_window,
                                 &input,
                                 state.msb_first,
@@ -2051,12 +2041,14 @@ pub(crate) async fn handle_client(
                     }
                     // Also generate XI2 event for the repeat.
                     let chain = ancestor_chain(&state.windows, repeat.target_wid);
+                    let ts = state.timestamp();
                     let xi_events = crate::xinput2::build_xi_events_for(
                         &mut state.xi.valuators,
                         &state.xi.selections,
                         &state.xi.passive_grabs,
                         &chain,
                         state.sequence,
+                        ts,
                         state.root_window,
                         &synth,
                         state.msb_first,

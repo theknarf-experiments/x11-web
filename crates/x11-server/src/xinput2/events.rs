@@ -101,6 +101,7 @@ pub fn build_raw_motion_event(sequence: u16, msb_first: bool) -> Vec<u8> {
 pub(crate) fn build_xi_pointer_event(
     event_type: u16,
     seq: u16,
+    time: u32,
     detail: u32,
     deviceid: xi::DeviceId,
     sourceid: xi::DeviceId,
@@ -157,7 +158,7 @@ pub(crate) fn build_xi_pointer_event(
         length: 0, // patched after first serialize
         event_type,
         deviceid,
-        time: 0, // CurrentTime
+        time,
         detail,
         root,
         event: event_window,
@@ -204,6 +205,7 @@ pub fn build_xi_events_for(
     passive_grabs: &[Xi2PassiveGrab],
     chain: &[u32],
     seq: u16,
+    time: u32,
     root_window: u32,
     input: &InputEvent,
     msb_first: bool,
@@ -360,6 +362,7 @@ pub fn build_xi_events_for(
                     passive_grabs,
                     chain,
                     seq,
+                    time,
                     root_window,
                     msb_first,
                 );
@@ -374,6 +377,7 @@ pub fn build_xi_events_for(
                     passive_grabs,
                     chain,
                     seq,
+                    time,
                     root_window,
                     msb_first,
                 );
@@ -428,6 +432,7 @@ pub fn build_xi_events_for(
         out.push(build_xi_pointer_event(
             device_type,
             seq,
+            time,
             detail,
             MASTER_POINTER_ID,
             MASTER_POINTER_ID,
@@ -510,6 +515,7 @@ pub(crate) fn build_gesture_events(
     let ev = build_xi_pointer_event(
         event_type,
         seq,
+        0, // gesture events: no server timestamp plumbed here yet
         detail,
         MASTER_POINTER_ID,
         MASTER_POINTER_ID,
@@ -561,6 +567,7 @@ pub fn build_raw_pointer_event(
 pub(crate) fn build_xi_crossing_event(
     event_type: u16,
     seq: u16,
+    time: u32,
     root_window: u32,
     event_window: u32,
     root_x: i16,
@@ -576,7 +583,7 @@ pub(crate) fn build_xi_crossing_event(
         length: 0,
         event_type,
         deviceid: MASTER_POINTER_ID,
-        time: 0,
+        time,
         sourceid: MASTER_POINTER_ID,
         mode: xi::NotifyMode::NORMAL,
         detail: xi::NotifyDetail::NONLINEAR,
@@ -618,6 +625,7 @@ pub fn build_xi_crossing_events_for(
     event_y: i16,
     seq: u16,
     root_window: u32,
+    time: u32,
     msb_first: bool,
 ) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
@@ -636,6 +644,7 @@ pub fn build_xi_crossing_events_for(
             out.push(build_xi_crossing_event(
                 xi::LEAVE_EVENT,
                 seq,
+                time,
                 root_window,
                 window,
                 root_x,
@@ -657,6 +666,7 @@ pub fn build_xi_crossing_events_for(
             out.push(build_xi_crossing_event(
                 xi::ENTER_EVENT,
                 seq,
+                time,
                 root_window,
                 window,
                 root_x,
@@ -809,6 +819,7 @@ pub fn build_xi_key_events(
     passive_grabs: &[Xi2PassiveGrab],
     chain: &[u32],
     seq: u16,
+    time: u32,
     root_window: u32,
     msb_first: bool,
 ) -> Vec<Vec<u8>> {
@@ -847,7 +858,7 @@ pub fn build_xi_key_events(
             length: 0,
             event_type,
             deviceid: MASTER_KEYBOARD_ID,
-            time: 0,
+            time,
             detail: keycode,
             root: root_window,
             event: event_window,

@@ -136,16 +136,6 @@ pub fn handle_request(
                         deviceid: em.deviceid,
                         mask: em.mask.clone(),
                     };
-                    tracing::debug!(
-                        "XISelectEvents: window={:#x} deviceid={} mask={:#x} (enter={} leave={} btn={} motion={})",
-                        req.window,
-                        em.deviceid,
-                        em.mask.first().map(|m| u32::from(*m)).unwrap_or(0),
-                        new_sel.wants(xi::ENTER_EVENT),
-                        new_sel.wants(xi::LEAVE_EVENT),
-                        new_sel.wants(xi::BUTTON_PRESS_EVENT),
-                        new_sel.wants(xi::MOTION_EVENT),
-                    );
                     if req.window == root_window && new_sel.wants(xi::RAW_MOTION_EVENT) {
                         wants_raw_motion = true;
                     }

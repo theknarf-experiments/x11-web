@@ -745,6 +745,29 @@ pub(crate) fn build_crossing_events_with_mode(
         }
     }
 
+    // XI2 crossings ride along with every core crossing, so all the
+    // call sites (map-under-pointer, grabs, XTEST, frontend input)
+    // stay in sync. GDK's XI2 device manager will not translate
+    // XI_Motion for a window it never got an XI_Enter for — hover was
+    // dead in every GTK3 app while clicks (translated unconditionally)
+    // worked.
+    let (local_x, local_y) = window_local_coords(&state.windows, new_window, root_window, x, y);
+    for ev in crate::xinput2::build_xi_crossing_events_for(
+        &state.xi.selections,
+        &old_path,
+        &new_path,
+        x,
+        y,
+        local_x,
+        local_y,
+        seq,
+        root_window,
+        timestamp,
+        bo,
+    ) {
+        events.extend_from_slice(&ev);
+    }
+
     state.last_entered_window = new_window;
     events
 }
