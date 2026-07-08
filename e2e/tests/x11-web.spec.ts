@@ -245,7 +245,7 @@ test("closing one app does not affect other apps", async ({
 	const windowFrames = page.locator('[data-testid="window-frame"]');
 
 	// Spawn two different apps
-	await spawnApp(page, "-geometry 200x150");
+	const xeyesFrame = await spawnApp(page, "-geometry 200x150");
 	await page.waitForTimeout(3000);
 
 	await spawnApp(page, "-fn fixed -geometry 40x10", "xterm");
@@ -254,8 +254,12 @@ test("closing one app does not affect other apps", async ({
 	// Both should be visible
 	await expect(windowFrames).toHaveCount(2, { timeout: 5_000 });
 
-	// Close the first window (xeyes)
-	await windowFrames.first().locator('[data-testid="window-close"]').click();
+	// Close xeyes. Raise it first — the frames spawn at overlapping
+	// positions, and a covered close button fails the click with
+	// "subtree intercepts pointer events".
+	await xeyesFrame.dispatchEvent("pointerdown");
+	await page.waitForTimeout(300);
+	await xeyesFrame.locator('[data-testid="window-close"]').click();
 
 	// Should have 1 window remaining
 	await expect(windowFrames).toHaveCount(1, { timeout: 10_000 });
@@ -797,50 +801,23 @@ test("firefox renders on the canvas", async ({ page, frontendUrl }) => {
 	await spawnApp(page, "-geometry 100x80+0+0");
 	await page.waitForTimeout(2000);
 
-	await page.locator('[data-testid="spawn-button"]').click();
-	await page.locator('input[placeholder="command"]').fill("firefox-esr");
-	await page.locator('input[placeholder="args"]').fill("");
-	await expect(page.locator("button", { hasText: "Spawn" })).toBeEnabled({
-		timeout: 30_000,
-	});
-	await page.locator("button", { hasText: "Spawn" }).click();
-
-	const windowFrames = page.locator('[data-testid="window-frame"]');
-	// Wait for Firefox window (in addition to xeyes)
-	await expect(windowFrames).toHaveCount(2, { timeout: 120_000 });
+	// spawnApp diffs frame ids, so this locator is pinned to the
+	// Firefox frame specifically. Polling "any canvas has content"
+	// is worthless here — xeyes satisfies it instantly, and the old
+	// version of this test then screenshotted the xeyes canvas.
+	const firefoxFrame = await spawnApp(page, "", "firefox-esr", 120_000);
+	const firefoxCanvas = firefoxFrame.locator('[data-testid="x11-canvas"]');
+	await expect(firefoxCanvas).toBeVisible({ timeout: 120_000 });
 
 	// Wait for rendered content on the Firefox canvas
 	await expect
-		.poll(
-			async () => {
-				const count = await windowFrames.count();
-				for (let i = 0; i < count; i++) {
-					const canvas = windowFrames
-						.nth(i)
-						.locator('[data-testid="x11-canvas"]');
-					if ((await canvas.isVisible()) && (await hasRenderedContent(canvas)))
-						return true;
-				}
-				return false;
-			},
-			{
-				timeout: 120_000,
-				intervals: [5000, 5000, 5000, 5000, 5000, 10000, 10000],
-			},
-		)
+		.poll(async () => hasRenderedContent(firefoxCanvas), {
+			timeout: 120_000,
+			intervals: [5000, 5000, 5000, 5000, 5000, 10000, 10000],
+		})
 		.toBe(true);
 
-	// Screenshot the Firefox canvas (last frame with content)
-	const count = await windowFrames.count();
-	let firefoxCanvas: Locator | null = null;
-	for (let i = 0; i < count; i++) {
-		const canvas = windowFrames.nth(i).locator('[data-testid="x11-canvas"]');
-		if ((await canvas.isVisible()) && (await hasRenderedContent(canvas))) {
-			firefoxCanvas = canvas;
-		}
-	}
-	expect(firefoxCanvas).not.toBeNull();
-	await expect(firefoxCanvas!).toHaveScreenshot("firefox-canvas.png", {
+	await expect(firefoxCanvas).toHaveScreenshot("firefox-canvas.png", {
 		maxDiffPixelRatio: 0.1,
 		timeout: 15_000,
 	});
