@@ -213,6 +213,62 @@ RUN mkdir -p /opt/test-content && cat > /opt/test-content/video-test.html <<'HTM
 HTMLEOF
 RUN cp /opt/test-video.mp4 /opt/test-content/test-video.mp4 2>/dev/null || true
 
+# GTK3 input probe: raw X event filter + widget signal loggers. The
+# two log layers bracket gdk_event_translate, so running this app
+# through the input pipeline shows exactly where events die inside a
+# GTK client (stdout is drained into the sidecar log by spawn()).
+# Kept as a compiled binary so the input debug e2e can dock-spawn it.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgtk-3-dev && rm -rf /var/lib/apt/lists/*
+RUN cat > /tmp/gtkprobe.c <<'GTKPROBEEOF'
+#include <gtk/gtk.h>
+#include <gdk/gdkx.h>
+#include <X11/Xlib.h>
+
+static GdkFilterReturn raw_filter(GdkXEvent *xev, GdkEvent *event, gpointer data) {
+    XEvent *x = (XEvent *)xev;
+    g_print("RAW type=%d win=0x%lx serial=%lu send=%d\n",
+            x->type, x->xany.window, x->xany.serial, x->xany.send_event);
+    return GDK_FILTER_CONTINUE;
+}
+static gboolean on_button(GtkWidget *w, GdkEventButton *e, gpointer d) {
+    g_print("WIDGET button x=%.0f y=%.0f button=%u time=%u\n",
+            e->x, e->y, e->button, e->time);
+    return FALSE;
+}
+static gboolean on_motion(GtkWidget *w, GdkEventMotion *e, gpointer d) {
+    g_print("WIDGET motion x=%.0f y=%.0f\n", e->x, e->y);
+    return FALSE;
+}
+static gboolean on_enter(GtkWidget *w, GdkEventCrossing *e, gpointer d) {
+    g_print("WIDGET enter x=%.0f y=%.0f mode=%d\n", e->x, e->y, e->mode);
+    return FALSE;
+}
+static gboolean on_key(GtkWidget *w, GdkEventKey *e, gpointer d) {
+    g_print("WIDGET key keyval=%u\n", e->keyval);
+    return FALSE;
+}
+int main(int argc, char **argv) {
+    gtk_init(&argc, &argv);
+    gdk_window_add_filter(NULL, raw_filter, NULL);
+    GtkWidget *win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_default_size(GTK_WINDOW(win), 400, 300);
+    gtk_widget_add_events(win, GDK_POINTER_MOTION_MASK | GDK_BUTTON_PRESS_MASK
+        | GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK | GDK_KEY_PRESS_MASK);
+    g_signal_connect(win, "button-press-event", G_CALLBACK(on_button), NULL);
+    g_signal_connect(win, "motion-notify-event", G_CALLBACK(on_motion), NULL);
+    g_signal_connect(win, "enter-notify-event", G_CALLBACK(on_enter), NULL);
+    g_signal_connect(win, "key-press-event", G_CALLBACK(on_key), NULL);
+    g_signal_connect(win, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    gtk_widget_show_all(win);
+    g_print("GTKPROBE ready\n");
+    gtk_main();
+    return 0;
+}
+GTKPROBEEOF
+RUN gcc -o /usr/local/bin/gtkprobe /tmp/gtkprobe.c \
+    $(pkg-config --cflags --libs gtk+-3.0) && rm /tmp/gtkprobe.c
+
 # Suppress Firefox first-run chrome (welcome tab, privacy-notice tab,
 # default-browser nag, whatsnew redirects). Without this every fresh
 # profile opens 1-2 extra tabs, which makes "which tab is active"

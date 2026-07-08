@@ -19,6 +19,81 @@ test.skip(
 	"diagnostics — set X11_INPUT_DEBUG=1 to run",
 );
 
+/** The decisive client-side split: gtkprobe logs every raw XEvent
+ *  GDK pulls off the socket AND every widget-level event GTK
+ *  dispatches. Raw-missing => Xlib/xcb never surfaces our events;
+ *  raw-present-widget-missing => gdk_event_translate drops them. */
+test("gtkprobe raw vs widget events", async ({
+	page,
+	frontendUrl,
+	sidecarContainer,
+}) => {
+	test.setTimeout(240_000);
+	const run = (cmd: string) =>
+		sidecarContainer.exec(["sh", "-c", cmd]).then((r) => r.output);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	const coreMode = !!process.env.GTKPROBE_CORE;
+	const frame = coreMode
+		? await spawnApp(
+				page,
+				"GDK_CORE_DEVICE_EVENTS=1 xtrace -n -o /tmp/xp99.log gtkprobe",
+				"env",
+				60_000,
+			)
+		: await spawnApp(page, "", "gtkprobe", 60_000);
+	const canvas = frame.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: 60_000 });
+	await page.waitForTimeout(3000);
+
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error("no canvas box");
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+		steps: 6,
+	});
+	await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+	await page.waitForTimeout(500);
+	await page.keyboard.press("g");
+	await page.waitForTimeout(2000);
+
+	const logs = await sidecarContainer.logs();
+	const chunks: string[] = [];
+	await new Promise<void>((resolve) => {
+		logs.on("data", (c: unknown) => chunks.push(String(c)));
+		logs.on("end", resolve);
+		setTimeout(resolve, 5000);
+	});
+	const probeLines = chunks
+		.join("")
+		.split("\n")
+		.filter((l) => l.includes("[gtkprobe:") || l.includes("[env:"))
+		.map((l) => l.replace(/^.*:stdout\] /, ""));
+	console.log("GTKPROBE OURS:\n" + probeLines.slice(-80).join("\n"));
+	const serverLines = chunks
+		.join("")
+		.split("\n")
+		.filter((l) => /frontend-input|crossing:|core-event|xi-dispatch/.test(l))
+		.map((l) => l.replace(/^.*(frontend-input|crossing:)/, "$1"));
+	console.log("SERVER INPUT LINES:\n" + serverLines.slice(-40).join("\n"));
+
+	const wire = await run(
+		"grep -E 'Event|Reply|Request' /tmp/xp99.log 2>/dev/null | tail -50",
+	);
+	console.log("CLIENT WIRE VIEW:\n" + wire);
+
+	// Baseline: same probe on Xvfb, synthetic input via xdotool.
+	await run("Xvfb :78 -screen 0 1024x768x24 2>/dev/null & sleep 2");
+	await run("DISPLAY=:78 nohup gtkprobe > /tmp/probe78.log 2>&1 & sleep 3");
+	await run("DISPLAY=:78 xdotool mousemove 200 150 && sleep 1");
+	await run("DISPLAY=:78 xdotool click 1 && sleep 1");
+	await run("DISPLAY=:78 xdotool key g && sleep 1");
+	const baseline = await run("cat /tmp/probe78.log | tail -60");
+	console.log("GTKPROBE XVFB:\n" + baseline);
+	await run("pkill gtkprobe 2>/dev/null; pkill Xvfb 2>/dev/null; true");
+	expect(probeLines.length + baseline.length).toBeGreaterThan(0);
+});
+
 /** Is the input deafness Firefox-specific or all of GTK3? A stock
  *  GTK3 demo's buttons prelight on hover and depress on click —
  *  pixel-level changes measurable without app-specific hooks. */
@@ -211,7 +286,7 @@ test("xtrace firefox click", async ({
 	await page.waitForTimeout(2000);
 
 	const selections = await run(
-		"grep -inE 'Request\\(131\\)|xinput|XIQuery|XISelect|opcode=131|unknown.*131' /tmp/xt.log | head -40",
+		"grep -iE '131,[0-9]' /tmp/xt.log | sed -E 's/unparsed-data.*//' | head -40",
 	);
 	console.log("XTRACE XI REQUESTS:\n" + selections);
 	const creates = await run(
@@ -219,7 +294,7 @@ test("xtrace firefox click", async ({
 	);
 	console.log("WINDOW EVENT MASKS:\n" + creates);
 	const afterClick = await run(
-		"sed -n '/CLICK MARKER/,$p' /tmp/xt.log | grep -vE 'NoExposure|CopyArea|PolyFill|PutImage|GetProperty|shm|Idle' | head -80",
+		"sed -n '/CLICK MARKER/,$p' /tmp/xt.log | grep -E 'Event' | grep -vE 'NoExposure' | head -60",
 	);
 	console.log("XTRACE EVENTS AFTER CLICK:\n" + afterClick);
 
@@ -235,11 +310,16 @@ test("xtrace firefox click", async ({
 	const rawLines = chunks
 		.join("")
 		.split("\n")
-		.filter((l) => l.includes("frontend-input"))
-		.map((l) => l.replace(/^.*frontend-input/, "frontend-input"));
-	console.log(
-		"RAW FRONTEND INPUT (last 30):\n" + rawLines.slice(-30).join("\n"),
-	);
+		.filter((l) =>
+			/frontend-input|xi-dispatch|crossing:|XISelectEvents/.test(l),
+		)
+		.map((l) =>
+			l.replace(
+				/^.*(frontend-input|xi-dispatch|crossing:|XISelectEvents)/,
+				"$1",
+			),
+		);
+	console.log("SERVER INPUT (last 40):\n" + rawLines.slice(-40).join("\n"));
 	expect(selections.length + afterClick.length).toBeGreaterThan(0);
 });
 
@@ -335,6 +415,83 @@ test("diff firefox request streams ours vs Xvfb", async ({
 	);
 	await run("pkill Xvfb 2>/dev/null; true");
 	expect(1).toBe(1);
+});
+
+/** Decisive: Firefox with XInputExtension disabled via kill switch.
+ *  If it falls back to core and :hover(blue)+click(magenta) work,
+ *  the fault is XI-specific and gating XI2 fixes Firefox. */
+test("firefox with xinput disabled", async ({ page, frontendUrl }) => {
+	test.setTimeout(240_000);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+	const frame = await spawnApp(
+		page,
+		"--no-remote --new-instance file:///opt/test-content/input-probe.html",
+		"firefox-esr",
+		120_000,
+	);
+	const canvas = frame.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: 120_000 });
+	await expect
+		.poll(() => colorFraction(canvas, [255, 255, 255]), {
+			timeout: 120_000,
+			intervals: [3000, 3000, 5000, 5000, 10000],
+		})
+		.toBeGreaterThan(0.5);
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error("no box");
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.6, {
+		steps: 6,
+	});
+	await page.waitForTimeout(2000);
+	console.log(
+		"XI-OFF FIREFOX blue=" + (await colorFraction(canvas, [0, 0, 255])),
+	);
+	await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.6);
+	await page.waitForTimeout(2000);
+	console.log(
+		"XI-OFF FIREFOX magenta=" + (await colorFraction(canvas, [255, 0, 255])),
+	);
+	expect(1).toBe(1);
+});
+
+/** Decisive multiprocess check: single-process Firefox
+ *  (MOZ_FORCE_DISABLE_E10S) renders content in the chrome process, so
+ *  the content window lives on the chrome X connection and is in our
+ *  hit-test tree. If :hover(blue) then works, Firefox input death is
+ *  the cross-connection content-window problem, not core delivery. */
+test("firefox single-process hover", async ({ page, frontendUrl }) => {
+	test.setTimeout(240_000);
+	await page.goto(frontendUrl);
+	await waitForDock(page);
+
+	const frame = await spawnApp(
+		page,
+		"MOZ_FORCE_DISABLE_E10S=1 firefox-esr --no-remote --new-instance file:///opt/test-content/input-probe.html",
+		"env",
+		120_000,
+	);
+	const canvas = frame.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: 120_000 });
+	await expect
+		.poll(() => colorFraction(canvas, [255, 255, 255]), {
+			timeout: 120_000,
+			intervals: [3000, 3000, 5000, 5000, 10000],
+		})
+		.toBeGreaterThan(0.5);
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error("no box");
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.6, {
+		steps: 6,
+	});
+	await page.waitForTimeout(2000);
+	const blue = await colorFraction(canvas, [0, 0, 255]);
+	console.log("SINGLE-PROC FIREFOX blue-fraction=" + blue);
+	await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.6);
+	await page.waitForTimeout(2000);
+	const magenta = await colorFraction(canvas, [255, 0, 255]);
+	console.log("SINGLE-PROC FIREFOX magenta-fraction=" + magenta);
+	expect(blue + magenta).toBeGreaterThanOrEqual(0);
 });
 
 /** Does Firefox's GTK loop consume X events at all? WM_DELETE via
