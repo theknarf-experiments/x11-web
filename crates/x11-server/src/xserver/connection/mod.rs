@@ -1327,6 +1327,16 @@ pub(crate) async fn handle_client(
                                 input,
                                 x11_web_protocol::InputEvent::ButtonPress { .. }
                             ) {
+                                // Focus is server-wide but `focus_window` is
+                                // per-connection: another client may have taken
+                                // focus since this connection last wrote it.
+                                // Without the refresh, clicking back into this
+                                // client's window sees its own stale focus,
+                                // skips click-to-focus, and the frontend never
+                                // receives a corrective `Focused` broadcast —
+                                // the menu bar then keeps whichever window's
+                                // late broadcast landed last.
+                                state.refresh_focus_from_shared();
                                 let cur = state.focus_window;
                                 let cur_top = state.top_level_for(cur);
                                 // Only run click-to-focus side effects when focus
