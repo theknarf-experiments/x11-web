@@ -57,11 +57,17 @@ impl ClientState {
         };
         let fb = &mut pix.framebuffer;
         let fb_data = fb.data_mut();
+        let copy_len = total_bytes.min(fb_data.len());
         unsafe {
             let src_ptr = seg.addr.add(offset);
-            let copy_len = total_bytes.min(fb_data.len());
             std::ptr::copy_nonoverlapping(src_ptr, fb_data.as_mut_ptr(), copy_len);
         }
+        // SHM clients write BGRA into the segment; the framebuffer
+        // stores RGBA. The SHM PutImage handler swaps at this same
+        // boundary — without the swap here, everything drawn through
+        // SHM-backed pixmaps (e.g. Firefox via Present) shows red and
+        // blue exchanged.
+        crate::framebuffer::swap_br_in_place(&mut fb_data[..copy_len]);
     }
 
     // -----------------------------------------------------------------------
