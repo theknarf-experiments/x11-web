@@ -235,7 +235,10 @@ impl ExtensionRegistry {
                 "DAMAGE",
                 143,
                 91,
-                152,
+                // 153, not 152 — XInputExtension owns 152; two
+                // extensions sharing an error base makes error codes
+                // ambiguous for clients.
+                153,
                 handlers::damage::handle_damage_request,
             );
             add(
@@ -360,6 +363,43 @@ impl ExtensionRegistry {
             }
         }
         false
+    }
+
+    /// Disable extensions by wire name from a comma-separated list —
+    /// the `X11WEB_DISABLE_EXTENSIONS` kill switch. Disabled
+    /// extensions vanish from QueryExtension / ListExtensions and
+    /// their requests answer BadRequest, so clients take their
+    /// no-extension fallback paths. Exists to bisect app breakage
+    /// caused by partially implemented extensions without rebuilding.
+    pub fn disable_by_names(&mut self, list: &str) {
+        for raw in list.split(',') {
+            let name = raw.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let mut found = false;
+            for entry in &mut self.entries {
+                if entry.wire_name.eq_ignore_ascii_case(name) {
+                    entry.enabled = false;
+                    found = true;
+                    tracing::warn!(
+                        "extension {:?} disabled via X11WEB_DISABLE_EXTENSIONS",
+                        entry.wire_name
+                    );
+                }
+            }
+            if !found {
+                tracing::warn!(
+                    "X11WEB_DISABLE_EXTENSIONS: no extension named {name:?} \
+                     (known: {})",
+                    self.entries
+                        .iter()
+                        .map(|e| e.wire_name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        }
     }
 }
 

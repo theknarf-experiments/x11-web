@@ -117,7 +117,16 @@ impl X11Server {
             screen_size_rx,
             shared_access_control: Arc::new(Mutex::new(types::AccessControlState::new())),
             shared_security_tokens: Arc::new(Mutex::new(HashMap::new())),
-            extension_registry: Arc::new(extensions::ExtensionRegistry::new()),
+            extension_registry: Arc::new({
+                let mut reg = extensions::ExtensionRegistry::new();
+                // Kill switch for bisecting app breakage caused by
+                // partially implemented extensions: comma-separated
+                // wire names, e.g. "XInputExtension,XKEYBOARD".
+                if let Ok(list) = std::env::var("X11WEB_DISABLE_EXTENSIONS") {
+                    reg.disable_by_names(&list);
+                }
+                reg
+            }),
         }
     }
 

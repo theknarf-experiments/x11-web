@@ -24,8 +24,8 @@ mod tests;
 
 // Re-export public items used by other modules in the crate.
 pub use events::{
-    build_raw_motion_event, build_xi_events_for, build_xi_focus_events_for,
-    patch_query_pointer_root,
+    build_raw_motion_event, build_xi_crossing_events_for, build_xi_events_for,
+    build_xi_focus_events_for, patch_query_pointer_root,
 };
 
 // Re-export internal builders / constants that the tests reach for via

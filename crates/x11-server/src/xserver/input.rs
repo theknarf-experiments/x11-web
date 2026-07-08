@@ -448,7 +448,14 @@ fn make_crossing_event(
             event_y: ev_y,
             state: 0u16.into(),
             mode: mode.into(),
-            same_screen_focus: 0x01 | if has_focus { 0x01 } else { 0x00 },
+            // Flag byte per X11 spec §7.4: bit 0 (0x01) = focus,
+            // bit 1 (0x02) = same-screen. This used to OR 0x01 with
+            // the focus bit — same-screen was never set and focus
+            // always was, so every crossing event told toolkits "the
+            // pointer is on another screen". GDK then never considered
+            // the pointer inside the window and dropped pointer input
+            // (Firefox rendered but ignored all clicks).
+            same_screen_focus: 0x02 | if has_focus { 0x01 } else { 0x00 },
         },
         bo,
     )

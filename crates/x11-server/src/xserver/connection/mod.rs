@@ -60,7 +60,7 @@ use super::core::*;
 use super::grab;
 use super::grab::GrabState;
 use super::handlers;
-use super::input::{build_x11_input_event, enforce_barriers, find_deepest_window};
+use super::input::{build_crossing_events, build_x11_input_event, enforce_barriers, find_deepest_window};
 use super::setup::{build_setup, byteswap_setup_reply};
 use super::types::*;
 use super::{ancestor_chain, handle_request};
@@ -1763,6 +1763,74 @@ pub(crate) async fn handle_client(
                                 }
                                 _ => input,
                             };
+                            tracing::debug!("frontend-input win={x11_wid:#x} {input:?}");
+                            // Crossing events: when this pointer event lands
+                            // in a different window than the pointer was
+                            // last in, emit core Enter/Leave and XI2
+                            // Enter/Leave BEFORE the event itself. GTK3's
+                            // XI2 device manager tracks which window
+                            // contains the pointer exclusively through
+                            // XI_Enter — without it, GDK never considers
+                            // the pointer inside the window and drops
+                            // pointer events before they reach widgets
+                            // (Firefox rendered fine but ignored every
+                            // click; xterm survived because core-protocol
+                            // clients don't gate on crossings).
+                            if let x11_web_protocol::InputEvent::MotionNotify { x, y, .. }
+                            | x11_web_protocol::InputEvent::ButtonPress { x, y, .. }
+                            | x11_web_protocol::InputEvent::ButtonRelease { x, y, .. } = &input
+                            {
+                                let (deepest, local_x, local_y) =
+                                    find_deepest_window(&state.windows, x11_wid, *x, *y);
+                                if deepest != state.last_entered_window {
+                                    let prev = state.last_entered_window;
+                                    let (off_x, off_y) = state
+                                        .windows
+                                        .get(&x11_wid)
+                                        .map(|w| (w.x as i32, w.y as i32))
+                                        .unwrap_or((0, 0));
+                                    let root_x = (off_x + *x as i32)
+                                        .clamp(i16::MIN as i32, i16::MAX as i32)
+                                        as i16;
+                                    let root_y = (off_y + *y as i32)
+                                        .clamp(i16::MIN as i32, i16::MAX as i32)
+                                        as i16;
+                                    // Core crossings (also updates
+                                    // last_entered_window).
+                                    let crossings = build_crossing_events(
+                                        &mut state, deepest, root_x, root_y, local_x, local_y,
+                                    );
+                                    if !crossings.is_empty() {
+                                        stream.write_all(&crossings).await?;
+                                    }
+                                    // XI2 crossings for selections along the
+                                    // leave/enter ancestor chains.
+                                    let leave_chain = ancestor_chain(&state.windows, prev);
+                                    let enter_chain = ancestor_chain(&state.windows, deepest);
+                                    let xi_crossings =
+                                        crate::xinput2::build_xi_crossing_events_for(
+                                            &state.xi.selections,
+                                            &leave_chain,
+                                            &enter_chain,
+                                            root_x,
+                                            root_y,
+                                            local_x,
+                                            local_y,
+                                            state.sequence,
+                                            state.root_window,
+                                            state.msb_first,
+                                        );
+                                    tracing::debug!(
+                                        "crossing: prev={prev:#x} -> deepest={deepest:#x} core_bytes={} xi_events={} enter_chain={enter_chain:x?}",
+                                        crossings.len(),
+                                        xi_crossings.len(),
+                                    );
+                                    for ev in xi_crossings {
+                                        stream.write_all(&ev).await?;
+                                    }
+                                }
+                            }
+
                             let event_bytes = build_x11_input_event(&mut state, &input, x11_wid);
 
                             // Per X11 spec, FocusOut/FocusIn precede the

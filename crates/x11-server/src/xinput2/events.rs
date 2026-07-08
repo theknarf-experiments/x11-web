@@ -555,6 +555,121 @@ pub fn build_raw_pointer_event(
     super::serialize_xi_reply(&event, msb_first)
 }
 
+/// Build an XI2 Enter (7) / Leave (8) crossing event with real pointer
+/// coordinates for delivery to a single window.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_xi_crossing_event(
+    event_type: u16,
+    seq: u16,
+    root_window: u32,
+    event_window: u32,
+    root_x: i16,
+    root_y: i16,
+    event_x: i16,
+    event_y: i16,
+    msb_first: bool,
+) -> Vec<u8> {
+    let event = xi::EnterEvent {
+        response_type: GE_GENERIC_EVENT,
+        extension: XI_MAJOR_OPCODE,
+        sequence: seq,
+        length: 0,
+        event_type,
+        deviceid: MASTER_POINTER_ID,
+        time: 0,
+        sourceid: MASTER_POINTER_ID,
+        mode: xi::NotifyMode::NORMAL,
+        detail: xi::NotifyDetail::NONLINEAR,
+        root: root_window,
+        event: event_window,
+        child: 0,
+        root_x: fp1616(root_x),
+        root_y: fp1616(root_y),
+        event_x: fp1616(event_x),
+        event_y: fp1616(event_y),
+        same_screen: true,
+        focus: false,
+        mods: mods_from_state(0),
+        group: xi::GroupInfo {
+            base: 0,
+            latched: 0,
+            locked: 0,
+            effective: 0,
+        },
+        buttons: vec![0],
+    };
+    super::serialize_xi_reply(&event, msb_first)
+}
+
+/// XI2 Enter/Leave events for selections along the leave/enter window
+/// chains. GTK3's XI2 device manager tracks which window contains the
+/// pointer *exclusively* through these — without an XI_Enter, GDK
+/// never considers the pointer inside the window and pointer events
+/// are quietly dropped before reaching widgets (the "Firefox renders
+/// but ignores every click" failure mode).
+#[allow(clippy::too_many_arguments)]
+pub fn build_xi_crossing_events_for(
+    selections: &[XiSelection],
+    leave_chain: &[u32],
+    enter_chain: &[u32],
+    root_x: i16,
+    root_y: i16,
+    event_x: i16,
+    event_y: i16,
+    seq: u16,
+    root_window: u32,
+    msb_first: bool,
+) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let device_matches =
+        |s: &XiSelection| s.deviceid == 0 || s.deviceid == 1 || s.deviceid == MASTER_POINTER_ID;
+
+    for &window in leave_chain {
+        if enter_chain.contains(&window) {
+            // Still inside this ancestor — no Leave for it.
+            continue;
+        }
+        let wants = selections
+            .iter()
+            .any(|s| s.window == window && device_matches(s) && s.wants(xi::LEAVE_EVENT));
+        if wants {
+            out.push(build_xi_crossing_event(
+                xi::LEAVE_EVENT,
+                seq,
+                root_window,
+                window,
+                root_x,
+                root_y,
+                event_x,
+                event_y,
+                msb_first,
+            ));
+        }
+    }
+    for &window in enter_chain {
+        if leave_chain.contains(&window) {
+            continue;
+        }
+        let wants = selections
+            .iter()
+            .any(|s| s.window == window && device_matches(s) && s.wants(xi::ENTER_EVENT));
+        if wants {
+            out.push(build_xi_crossing_event(
+                xi::ENTER_EVENT,
+                seq,
+                root_window,
+                window,
+                root_x,
+                root_y,
+                event_x,
+                event_y,
+                msb_first,
+            ));
+        }
+    }
+    out
+}
+
 /// Build an XI2 FocusIn / FocusOut event for delivery to a single window.
 /// The wire format is shared with EnterEvent (x11rb aliases `FocusInEvent`
 /// to `EnterEvent`).
