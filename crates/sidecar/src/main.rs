@@ -79,11 +79,38 @@ impl ProcessManager {
         if let Ok(xauth) = std::env::var("XAUTHORITY") {
             cmd.env("XAUTHORITY", xauth);
         }
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("Failed to spawn process: {e}"))?;
 
         let pid = child.id().ok_or("Failed to get process id")?;
+
+        // Drain child stdout/stderr into our own log. The pipes are
+        // never read otherwise, so any app chatty enough to fill the
+        // 64KB pipe buffer (Firefox with GDK_DEBUG, GTK warnings,
+        // election-year xterm scrollback…) would block on write and
+        // appear to hang. Also makes child diagnostics visible in
+        // `docker logs`.
+        if let Some(stdout) = child.stdout.take() {
+            let cmd_name = command.to_string();
+            tokio::spawn(async move {
+                use tokio::io::AsyncBufReadExt;
+                let mut lines = tokio::io::BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    info!("[{cmd_name}:{pid}:stdout] {line}");
+                }
+            });
+        }
+        if let Some(stderr) = child.stderr.take() {
+            let cmd_name = command.to_string();
+            tokio::spawn(async move {
+                use tokio::io::AsyncBufReadExt;
+                let mut lines = tokio::io::BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    info!("[{cmd_name}:{pid}:stderr] {line}");
+                }
+            });
+        }
         self.processes.insert(
             pid,
             ManagedProcess {
