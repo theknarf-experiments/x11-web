@@ -343,15 +343,19 @@ test("resizing one window does not affect other windows", async ({
 	await expect(canvas2).toBeVisible();
 	await page.waitForTimeout(3000);
 
-	// Drag win2 out of the way so win1's resize handle is accessible
+	// Drag win2 out of the way so win1's resize handle is accessible.
+	// Grab the header at its horizontal centre — a fixed small offset
+	// lands on the traffic-light buttons, whose pointerdown handlers
+	// stopPropagation and silently swallow the drag.
 	const titleBar2 = win2.locator('[class*="header"]');
 	const tb2Box = await titleBar2.boundingBox();
-	if (tb2Box) {
-		await page.mouse.move(tb2Box.x + 50, tb2Box.y + 10);
-		await page.mouse.down();
-		await page.mouse.move(tb2Box.x + 400, tb2Box.y + 10, { steps: 5 });
-		await page.mouse.up();
-	}
+	if (!tb2Box) throw new Error("win2 title bar has no bounding box");
+	await page.mouse.move(tb2Box.x + tb2Box.width / 2, tb2Box.y + 10);
+	await page.mouse.down();
+	await page.mouse.move(tb2Box.x + tb2Box.width / 2 + 400, tb2Box.y + 10, {
+		steps: 5,
+	});
+	await page.mouse.up();
 	await page.waitForTimeout(1000);
 
 	// Record both canvas sizes
