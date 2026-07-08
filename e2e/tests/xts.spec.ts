@@ -3,15 +3,15 @@
  * reorganisation pass.
  */
 
+import type { StartedTestContainer } from "testcontainers";
 import {
-	test,
 	expect,
-	spawnApp,
-	waitForDock,
 	hasRenderedContent,
 	runPythonScript,
+	spawnApp,
+	test,
+	waitForDock,
 } from "./fixtures";
-import type { StartedTestContainer } from "testcontainers";
 
 async function execInSidecar(
 	container: StartedTestContainer,

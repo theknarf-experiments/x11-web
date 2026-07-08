@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("MIT-MAGIC-COOKIE-1 authentication", () => {
 	test("xauth list shows a cookie for display :99", async ({

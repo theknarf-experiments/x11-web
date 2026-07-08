@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe("Clipboard manager", () => {
 	test("CLIPBOARD_MANAGER selection has an owner", async ({

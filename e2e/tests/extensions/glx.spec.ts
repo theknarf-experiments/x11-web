@@ -3,8 +3,8 @@
  * reorganisation pass.
  */
 
-import { test, expect, waitForDock, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
+import { expect, runPythonScript, test, waitForDock } from "../fixtures";
 
 async function execInSidecar(
 	container: StartedTestContainer,

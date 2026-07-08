@@ -2,6 +2,7 @@ import type { Locator } from "@playwright/test";
 import {
 	canvasPixelHash,
 	cleanupApps,
+	colorFraction,
 	countNonBlackPixels,
 	expect,
 	hasRenderedContent,
@@ -823,83 +824,74 @@ test("firefox renders on the canvas", async ({ page, frontendUrl }) => {
 	});
 });
 
+/** Deterministic input check. The probe page (baked into the sidecar
+ *  image) is white and can ONLY change color by receiving real DOM
+ *  events: pointerdown → magenta, `g` keydown → green. Asserting on
+ *  exact-color pixel fractions is immune to the animations, blinking
+ *  carets and page loads that made hash/screenshot-diff versions of
+ *  this test pass while input was completely broken. */
 test("firefox responds to mouse and keyboard input", async ({
 	page,
 	frontendUrl,
 }) => {
-	test.setTimeout(180_000);
+	// KNOWN BROKEN: GTK3 apps (Firefox, gtk3-demo — core and XI2 input
+	// modes alike) receive a wire-correct event stream (verified with
+	// xtrace against an Xvfb baseline; see e2e/tests/debug-ext.spec.ts)
+	// but never dispatch pointer/key events to widgets. ClientMessage
+	// (WM_DELETE) on the same connection IS processed. test.fail()
+	// keeps the suite green while alarming when input starts working —
+	// remove the annotation then.
+	test.fail(
+		true,
+		"GTK3 input dispatch dead on our server — under investigation",
+	);
+	test.setTimeout(240_000);
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
-	// Spawn xeyes first — matches the manual testing flow
-	await spawnApp(page, "-geometry 100x80+0+0");
-	await page.waitForTimeout(2000);
-
-	await page.locator('[data-testid="spawn-button"]').click();
-	await page.locator('input[placeholder="command"]').fill("firefox-esr");
-	await page.locator('input[placeholder="args"]').fill("");
-	await expect(page.locator("button", { hasText: "Spawn" })).toBeEnabled({
-		timeout: 30_000,
-	});
-	await page.locator("button", { hasText: "Spawn" }).click();
-
-	const windowFrames = page.locator('[data-testid="window-frame"]');
-	await expect(windowFrames).toHaveCount(2, { timeout: 120_000 });
-
-	// Find the *largest* canvas — that's Firefox's main window (~921x691),
-	// not the 100x80 xeyes. Iterating in DOM order with reassignment used
-	// to land us on whichever canvas iterated last, which was non-
-	// deterministic between runs.
-	let firefoxCanvas: Locator | null = null;
-	await expect
-		.poll(
-			async () => {
-				const count = await windowFrames.count();
-				let largestArea = 0;
-				let withContent = 0;
-				for (let i = 0; i < count; i++) {
-					const canvas = windowFrames
-						.nth(i)
-						.locator('[data-testid="x11-canvas"]');
-					if (!(await canvas.isVisible())) continue;
-					if (!(await hasRenderedContent(canvas))) continue;
-					withContent++;
-					const size = await canvas.evaluate((el: HTMLCanvasElement) => ({
-						w: el.width,
-						h: el.height,
-					}));
-					const area = size.w * size.h;
-					if (area > largestArea) {
-						largestArea = area;
-						firefoxCanvas = canvas;
-					}
-				}
-				return withContent >= 2;
-			},
-			{ timeout: 120_000, intervals: [5000, 5000, 5000, 5000, 5000, 10000] },
-		)
-		.toBe(true);
-
-	expect(firefoxCanvas).not.toBeNull();
-	const hashBefore = await canvasPixelHash(firefoxCanvas!);
-	const pixelsBefore = await countNonBlackPixels(firefoxCanvas!);
-	expect(pixelsBefore).toBeGreaterThan(1000);
-
-	// Click the address bar and type a URL
-	const box = await firefoxCanvas!.boundingBox();
-	expect(box).not.toBeNull();
-	await page.mouse.click(
-		box!.x + box!.width * 0.5,
-		box!.y + box!.height * 0.08,
+	const firefoxFrame = await spawnApp(
+		page,
+		"--no-remote --new-instance file:///opt/test-content/input-probe.html",
+		"firefox-esr",
+		120_000,
 	);
-	await page.waitForTimeout(1000);
-	await page.keyboard.type("about:config", { delay: 50 });
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(5000);
+	const canvas = firefoxFrame.locator('[data-testid="x11-canvas"]');
+	await expect(canvas).toBeVisible({ timeout: 120_000 });
 
-	// The page should have changed
-	const hashAfter = await canvasPixelHash(firefoxCanvas!);
-	expect(hashAfter).not.toBe(hashBefore);
+	// The probe page is white; browser chrome occupies only the top
+	// strip, so "mostly white" ⇒ the page is loaded and frontmost.
+	await expect
+		.poll(() => colorFraction(canvas, [255, 255, 255]), {
+			timeout: 120_000,
+			intervals: [3000, 3000, 5000, 5000, 10000, 10000],
+		})
+		.toBeGreaterThan(0.5);
+
+	// Hover: moving the pointer over the content turns the page blue
+	// via pure CSS :hover — no JS, no DOM event dispatch. This
+	// isolates "pointer events reach Gecko at all" from clicks.
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error("firefox canvas has no bounding box");
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.6, {
+		steps: 5,
+	});
+	await expect
+		.poll(() => colorFraction(canvas, [0, 0, 255]), { timeout: 30_000 })
+		.toBeGreaterThan(0.4);
+
+	// Mouse: a real pointerdown in the content area flips the page
+	// magenta — nothing else can produce that color.
+	await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.6);
+	await expect
+		.poll(() => colorFraction(canvas, [255, 0, 255]), { timeout: 30_000 })
+		.toBeGreaterThan(0.4);
+
+	// Keyboard: `g` flips it green. The click above focused the
+	// content area, so the keystroke must route to the page.
+	await page.keyboard.press("g");
+	await expect
+		.poll(() => colorFraction(canvas, [0, 204, 0]), { timeout: 30_000 })
+		.toBeGreaterThan(0.4);
 });
 
 test("scrolling on a window canvas does not pan the InfiniteCanvas", async ({

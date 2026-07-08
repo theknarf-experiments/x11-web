@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe("App compatibility: window manager compliance", () => {
 	test("_NET_WM_STATE transitions: fullscreen and maximize via xdotool", async ({

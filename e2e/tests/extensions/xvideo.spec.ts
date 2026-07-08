@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe("XVideo extension FOURCC formats", () => {
 	test("XVideo QueryAdaptors and ListImageFormats return formats", async ({

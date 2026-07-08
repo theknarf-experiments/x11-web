@@ -123,6 +123,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     imagemagick \
     xvfb \
     xdotool \
+    # X11 protocol tracer — decodes the full client<->server byte
+    # stream for input-pipeline debugging (`xtrace -o log cmd...`).
+    xtrace \
     gnome-calculator \
     xauth \
     xclip \
@@ -209,6 +212,49 @@ RUN mkdir -p /opt/test-content && cat > /opt/test-content/video-test.html <<'HTM
 </body></html>
 HTMLEOF
 RUN cp /opt/test-video.mp4 /opt/test-content/test-video.mp4 2>/dev/null || true
+
+# Suppress Firefox first-run chrome (welcome tab, privacy-notice tab,
+# default-browser nag, whatsnew redirects). Without this every fresh
+# profile opens 1-2 extra tabs, which makes "which tab is active"
+# non-deterministic for e2e tests that pass a URL on the command line.
+RUN mkdir -p /etc/firefox-esr && cat > /etc/firefox-esr/e2e-prefs.js <<'PREFSEOF'
+pref("browser.aboutwelcome.enabled", false);
+pref("browser.startup.homepage_override.mstone", "ignore");
+pref("startup.homepage_welcome_url", "");
+pref("startup.homepage_welcome_url.additional", "");
+pref("startup.homepage_override_url", "");
+pref("datareporting.policy.firstRunURL", "");
+pref("datareporting.policy.dataSubmissionEnabled", false);
+pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+pref("browser.shell.checkDefaultBrowser", false);
+pref("app.update.enabled", false);
+PREFSEOF
+
+# Input-probe page for the deterministic Firefox input e2e test: the
+# page can ONLY change color by receiving real DOM input events, so
+# counting exact-color pixels verifies the input pipeline end-to-end
+# without golden screenshots (immune to animations/blinking carets).
+RUN cat > /opt/test-content/input-probe.html <<'PROBEEOF'
+<!DOCTYPE html>
+<html><head><title>input probe</title>
+<style>
+  html,body{margin:0;height:100%;background:#ffffff}
+  /* Pure-CSS probe: hover needs no JS and no click — it isolates
+     "pointer events reach Gecko at all" from DOM event dispatch. */
+  body:hover{background:#0000ff}
+</style>
+</head><body>
+<script>
+  addEventListener('pointerdown', () => {
+    document.body.style.setProperty('background', '#ff00ff', 'important');
+  });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'g')
+      document.body.style.setProperty('background', '#00cc00', 'important');
+  });
+</script>
+</body></html>
+PROBEEOF
 # Copy Xts test suite from builder
 COPY --from=xts-builder /opt/xts /opt/xts
 COPY --from=xts-builder /opt/xts-src /opt/xts-src

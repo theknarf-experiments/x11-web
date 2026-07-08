@@ -3,8 +3,8 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
+import { expect, test } from "../fixtures";
 
 async function execInSidecar(
 	container: StartedTestContainer,

@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe("DAMAGE extension", () => {
 	test("DamageCreate and DamageDestroy work without errors", async ({

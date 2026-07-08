@@ -11,15 +11,15 @@
 
 import type { Locator, Page } from "@playwright/test";
 import {
-	test,
-	expect,
-	spawnApp,
-	waitForDock,
-	hasRenderedContent,
-	countNonBlackPixels,
 	canvasPixelHash,
-	waitForCanvasStable,
 	cleanupApps,
+	countNonBlackPixels,
+	expect,
+	hasRenderedContent,
+	spawnApp,
+	test,
+	waitForCanvasStable,
+	waitForDock,
 } from "./fixtures";
 
 // Re-usable timeout for Firefox startup
@@ -757,7 +757,7 @@ test.skip("DIAG: keyboard Ctrl+L navigation", async ({
 			'echo "FF=$FF"; ' +
 			'xprop -id "$FF" WM_PROTOCOLS WM_HINTS 2>&1; ' +
 			"echo '--- xprop event masks on all children ---'; " +
-			"for c in $(xwininfo -id $FF -tree 2>/dev/null | grep -oE '0x[0-9a-f]+' | grep -v \"^$FF\$\"); do " +
+			"for c in $(xwininfo -id $FF -tree 2>/dev/null | grep -oE '0x[0-9a-f]+' | grep -v \"^$FF$\"); do " +
 			"  echo -n \"child $c xprop: \"; xprop -id $c 2>/dev/null | grep -i 'event.*mask\\|all.*event\\|your.*event'; " +
 			"done; " +
 			"echo '--- getinputfocus before click ---'; " +

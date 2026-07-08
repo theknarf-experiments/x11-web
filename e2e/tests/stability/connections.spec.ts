@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe("XCB protocol round-trip", () => {
 	test("window lifecycle round-trip", async ({ sidecarContainer }) => {

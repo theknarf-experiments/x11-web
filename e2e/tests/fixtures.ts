@@ -12,10 +12,10 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-	type Locator,
-	type Page,
 	test as base,
 	expect,
+	type Locator,
+	type Page,
 } from "@playwright/test";
 import type { StartedTestContainer } from "testcontainers";
 import { GenericContainer, Wait } from "testcontainers";
@@ -253,8 +253,14 @@ async function doSetup() {
 					// inside python that doesn't propagate explicit env, so
 					// they pick up the container default.
 					DISPLAY: ":99",
-					RUST_LOG: "info",
+					RUST_LOG: process.env.SIDECAR_RUST_LOG ?? "info",
 					NO_AT_BRIDGE: "1",
+					// Pass through the extension kill switch so a test
+					// run can bisect app breakage per X extension, e.g.
+					// X11WEB_DISABLE_EXTENSIONS=XInputExtension pnpm
+					// exec playwright test …
+					X11WEB_DISABLE_EXTENSIONS:
+						process.env.X11WEB_DISABLE_EXTENSIONS ?? "",
 				})
 				// Use a shell-based readiness probe (X socket + backend WS
 				// still alive) instead of `Wait.forLogMessage`. Log-based
@@ -419,6 +425,38 @@ export async function hasRenderedContent(canvas: Locator): Promise<boolean> {
 		}
 		return false;
 	});
+}
+
+/** Fraction of canvas pixels within `tol` of an exact RGB color.
+ *  The animation-proof alternative to golden screenshots for "did
+ *  input reach the app": a probe page changes to a known color only
+ *  in response to a real DOM event, and blinking carets / loading
+ *  spinners can't counterfeit a half-screen color flip. */
+export async function colorFraction(
+	canvas: Locator,
+	rgb: [number, number, number],
+	tol = 12,
+): Promise<number> {
+	return canvas.evaluate(
+		(el: HTMLCanvasElement, { rgb, tol }) => {
+			const ctx = el.getContext("2d");
+			if (!ctx || el.width === 0 || el.height === 0) return 0;
+			const d = ctx.getImageData(0, 0, el.width, el.height).data;
+			let hit = 0;
+			const total = el.width * el.height;
+			for (let i = 0; i < d.length; i += 4) {
+				if (
+					Math.abs(d[i] - rgb[0]) <= tol &&
+					Math.abs(d[i + 1] - rgb[1]) <= tol &&
+					Math.abs(d[i + 2] - rgb[2]) <= tol
+				) {
+					hit++;
+				}
+			}
+			return hit / total;
+		},
+		{ rgb, tol },
+	);
 }
 
 export async function canvasPixelHash(canvas: Locator): Promise<string> {

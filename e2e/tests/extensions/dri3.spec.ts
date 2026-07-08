@@ -5,7 +5,7 @@
  * registering the extension without a real handler) trips the suite.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("DRI3 is not advertised", () => {
 	test("xdpyinfo does not list DRI3", async ({ sidecarContainer }) => {

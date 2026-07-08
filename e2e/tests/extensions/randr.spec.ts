@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe("RandR output properties", () => {
 	test("xrandr lists outputs with properties", async ({ sidecarContainer }) => {

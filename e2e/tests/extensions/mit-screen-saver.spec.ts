@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("screen saver", () => {
 	test("GetScreenSaver returns settings", async ({ sidecarContainer }) => {

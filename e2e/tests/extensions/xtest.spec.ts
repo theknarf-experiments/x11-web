@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("App compatibility: xterm real interaction", () => {
 	test("xterm receives XTEST key injection and text appears", async ({

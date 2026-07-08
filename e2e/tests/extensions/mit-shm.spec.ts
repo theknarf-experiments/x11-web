@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("SHM extension", () => {
 	test("MIT-SHM extension is available", async ({ sidecarContainer }) => {

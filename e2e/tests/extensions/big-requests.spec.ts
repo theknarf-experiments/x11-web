@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("Big requests extension", () => {
 	test("BIG-REQUESTS extension is available", async ({ sidecarContainer }) => {
