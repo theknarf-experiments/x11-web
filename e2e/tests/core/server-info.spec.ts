@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("Conformance: X-Resource extension", () => {
 	test("xdpyinfo lists X-Resource extension", async ({ sidecarContainer }) => {

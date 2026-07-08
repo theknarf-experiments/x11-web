@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe("Focus model", () => {
 	test("SetInputFocus and GetInputFocus with revert modes", async ({

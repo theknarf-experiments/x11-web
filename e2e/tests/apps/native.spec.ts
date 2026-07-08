@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe("Application smoke tests", () => {
 	test("Firefox ESR starts and creates a window", async ({

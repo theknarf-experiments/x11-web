@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
+import { expect, runPythonScript, test } from "../fixtures";
 
 test.describe
 	.serial("Grab protocol compliance", () => {

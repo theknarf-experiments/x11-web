@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("App compatibility: Chromium", () => {
 	test("chromium creates an X11 window and xwininfo reports it", async ({

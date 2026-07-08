@@ -3,8 +3,8 @@
  * reorganisation pass.
  */
 
-import { test, expect, runPythonScript } from "../fixtures";
 import type { StartedTestContainer } from "testcontainers";
+import { expect, runPythonScript, test } from "../fixtures";
 
 async function probe(
 	container: StartedTestContainer,

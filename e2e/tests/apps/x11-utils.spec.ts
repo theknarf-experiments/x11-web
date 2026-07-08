@@ -3,17 +3,17 @@
  * reorganisation pass.
  */
 
+import type { StartedTestContainer } from "testcontainers";
 import {
-	test,
+	canvasPixelHash,
 	expect,
+	hasRenderedContent,
 	runPythonScript,
 	spawnApp,
-	waitForDock,
+	test,
 	waitForCanvasStable,
-	canvasPixelHash,
-	hasRenderedContent,
+	waitForDock,
 } from "../fixtures";
-import type { StartedTestContainer } from "testcontainers";
 
 async function execInSidecar(
 	container: StartedTestContainer,

@@ -4,11 +4,11 @@
  */
 
 import {
-	test,
 	expect,
-	spawnApp,
-	waitForDock,
 	hasRenderedContent,
+	spawnApp,
+	test,
+	waitForDock,
 } from "../fixtures";
 
 test.describe("Nested X compatibility", () => {

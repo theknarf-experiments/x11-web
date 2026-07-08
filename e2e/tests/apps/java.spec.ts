@@ -3,7 +3,7 @@
  * reorganisation pass.
  */
 
-import { test, expect } from "../fixtures";
+import { expect, test } from "../fixtures";
 
 test.describe("App compatibility: Java/Swing", () => {
 	test("Java Swing creates an X11 window", async ({ sidecarContainer }) => {
