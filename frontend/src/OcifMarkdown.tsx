@@ -1,7 +1,7 @@
 import { MarkdownArea } from "@x11-web/components";
 import { useCallback, useEffect, useRef } from "react";
-import s from "./OcifMarkdown.module.css";
 import type { ResizeHandle } from "./OcifBox";
+import s from "./OcifMarkdown.module.css";
 import type { OcifNode } from "./workspaceSync";
 
 interface OcifMarkdownProps {

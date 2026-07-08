@@ -5,11 +5,11 @@ import {
 	clientToCanvas,
 	keyDownToInput,
 	keyUpToInput,
+	modifierMask,
 	mouseButtonMask,
 	mouseDownToInput,
 	mouseMoveToInput,
 	mouseUpToInput,
-	modifierMask,
 	x11Button,
 } from "./inputProtocol";
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import type { ClientRenderer } from "./ClientRenderer";
 import {
 	useDndBridge,
 	usePinchGesture,
@@ -14,7 +15,6 @@ import {
 	mouseUpToInput,
 } from "./inputProtocol";
 import { computeResize, startPointerDrag } from "./pointerDrag";
-import type { ClientRenderer } from "./ClientRenderer";
 import type { InputEvent, WindowWmState } from "./types";
 import s from "./WindowFrame.module.css";
 

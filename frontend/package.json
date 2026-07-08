@@ -23,6 +23,8 @@
 		"@tanstack/db": "^0.6.5",
 		"@tanstack/react-db": "^0.1.83",
 		"@tanstack/react-hotkeys": "^0.10.0",
+		"@x11-web/canvas-core": "workspace:*",
+		"@x11-web/canvas-r3f": "workspace:*",
 		"@x11-web/components": "workspace:*",
 		"capnp-es": "^0.0.14",
 		"pako": "^2.1.0",

@@ -1,18 +1,22 @@
 import { useLiveQuery } from "@tanstack/react-db";
+import { useHotkey } from "@tanstack/react-hotkeys";
+import { createCameraStore } from "@x11-web/canvas-core";
+import { CanvasShapeLayer } from "@x11-web/canvas-r3f";
 import {
 	AppContextMenu,
-	CanvasToolbar,
 	type CanvasTool,
+	CanvasToolbar,
 	DiagnosticsPanel,
-	Dock,
 	DOCK_WINDOW_DRAG_MIME,
+	Dock,
 	type DockProcess,
-	getAppContextMenuItems,
 	GlobalMenuBar,
+	getAppContextMenuItems,
 	InfiniteCanvas,
 	TOOL_HOTKEYS,
 } from "@x11-web/components";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useBellSound } from "./bellSound";
 import { ClientRenderer } from "./ClientRenderer";
 import {
 	applyOcifNodesSnapshot,
@@ -23,24 +27,23 @@ import {
 	windowsCollection,
 	windowsForProcess,
 } from "./db";
-import { useHotkey } from "@tanstack/react-hotkeys";
+import { useFrameRouter } from "./frameRouter";
 import { OcifArrow } from "./OcifArrow";
 import { OcifBox, type ResizeHandle } from "./OcifBox";
 import { OcifMarkdown } from "./OcifMarkdown";
 import { OcifPath } from "./OcifPath";
 import { OcifText, type TextCorner } from "./OcifText";
-import { useBellSound } from "./bellSound";
-import { useFrameRouter } from "./frameRouter";
 import { SettingsPanel } from "./SettingsPanel";
+import { buildShapeLayerData } from "./shapeLayer";
 import type { FocusPolicy, MenuAction } from "./types";
+import { useAuth } from "./useAuth";
 import {
 	useAttachedWindowIds,
 	useBackendSocket,
 	useWorkspaceName,
 } from "./useBackendSocket";
-import { useAuth } from "./useAuth";
-import { useWindowActions } from "./windowActions";
 import { WindowFrame } from "./WindowFrame";
+import { useWindowActions } from "./windowActions";
 import {
 	appendOcifNodePathPoint,
 	deleteOcifNode,
@@ -128,6 +131,13 @@ function App() {
 		}
 		return out;
 	}, [ocifNodeRows, activeWorkspaceId]);
+
+	/** GL shape-layer geometry (boxes / paths / arrows) derived from
+	 *  the same node map the DOM hit-areas render from. */
+	const shapeLayerData = useMemo(
+		() => buildShapeLayerData(ocifNodes),
+		[ocifNodes],
+	);
 
 	const { data: processes = [] } = useLiveQuery((q) =>
 		q.from({ p: processesCollection }).select(({ p }) => p),
@@ -239,6 +249,9 @@ function App() {
 	const pageToCanvasRef = useRef<
 		((cx: number, cy: number) => { x: number; y: number }) | null
 	>(null);
+	/** Shared camera: InfiniteCanvas drives it from gestures; the GL
+	 *  shape layer's ortho camera follows it in lockstep. */
+	const canvasCamera = useMemo(() => createCameraStore(), []);
 	/** Highest `z` we've assigned to any node in this session. New
 	 *  boxes get `maxZ + 1` so they land on top. */
 	const maxNodeZRef = useRef(0);
@@ -1039,6 +1052,10 @@ function App() {
 			/>
 			<InfiniteCanvas
 				pageToCanvasRef={pageToCanvasRef}
+				cameraStore={canvasCamera}
+				underlay={
+					<CanvasShapeLayer camera={canvasCamera} {...shapeLayerData} />
+				}
 				onCanvasPointerDown={handleCanvasPointerDown}
 				onCanvasDrop={(point, event) => {
 					const windowId = event.dataTransfer.getData(DOCK_WINDOW_DRAG_MIME);

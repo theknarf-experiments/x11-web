@@ -1,3 +1,4 @@
+import { SpanStatusCode } from "@opentelemetry/api";
 import {
 	useCallback,
 	useEffect,
@@ -15,26 +16,25 @@ import {
 } from "./db";
 import { Reassembler } from "./rtcReassembler";
 import { decodeFrame } from "./rtcWire";
-import {
-	applyInbound,
-	attachWindowNode,
-	detachWindowNode,
-	getName as getWorkspaceName,
-	getWindowNodeIds,
-	setControlChannel,
-	setName as setWorkspaceName,
-	subscribe as subscribeWorkspace,
-} from "./workspaceSync";
+import { spanAttrsFor, tracer } from "./telemetry";
 import type {
 	FrontendToBackend,
 	WindowDescriptor,
 	WindowUpdate,
 	Workspace,
 } from "./types";
-import { SpanStatusCode } from "@opentelemetry/api";
-import { spanAttrsFor, tracer } from "./telemetry";
-import { decodeBackendMsg, encodeFrontendMsg } from "./wsWire";
 import { colorForWindowId } from "./windowColors";
+import {
+	applyInbound,
+	attachWindowNode,
+	detachWindowNode,
+	getWindowNodeIds,
+	getName as getWorkspaceName,
+	setControlChannel,
+	setName as setWorkspaceName,
+	subscribe as subscribeWorkspace,
+} from "./workspaceSync";
+import { decodeBackendMsg, encodeFrontendMsg } from "./wsWire";
 
 // Resolve order: ?ws=... query param > VITE_WS_URL build-time env >
 // same-origin default. Same-origin works in production (backend
@@ -64,6 +64,7 @@ export type DataChannelMessageCallback = (data: Uint8Array) => void;
 // that renders it). Re-exported here so existing importers in this
 // file's neighbourhood don't need to change.
 import type { Diagnostic } from "@x11-web/components";
+
 export type { Diagnostic };
 
 const MAX_DIAGNOSTICS = 100;

@@ -60,29 +60,41 @@ export function appendOcifNodePathPoint(
 	scheduleFlush(workspaceId);
 }
 
-/** Run perfect-freehand on a flat `[x, y, p, x, y, p, ...]` list
- *  and produce a smoothed SVG path string in the same coord space
- *  as the inputs. Returns `null` for inputs that can't form a
- *  stroke (< 2 samples, or perfect-freehand collapsed them).
- *
- *  Called by `OcifPath` on every render — pure function of
- *  `points`, so memoize on the array reference. */
-export function svgPathFromPoints(points: number[]): string | null {
+const STROKE_OPTIONS = {
+	size: 6,
+	thinning: 0.6,
+	smoothing: 0.5,
+	streamline: 0.5,
+	simulatePressure: true,
+};
+
+/** Run perfect-freehand on a flat `[x, y, p, x, y, p, ...]` list and
+ *  return the smoothed outline polygon in the same coord space as
+ *  the inputs. Returns `null` for inputs that can't form a stroke
+ *  (< 2 samples, or perfect-freehand collapsed them). */
+export function outlineFromPoints(
+	points: number[],
+): Array<[number, number]> | null {
 	if (points.length < 6) return null;
 	const inputPoints: Array<[number, number, number]> = [];
 	for (let i = 0; i + 2 < points.length; i += 3) {
 		inputPoints.push([points[i], points[i + 1], points[i + 2]]);
 	}
 	if (inputPoints.length < 2) return null;
-	const stroke = getStroke(inputPoints, {
-		size: 6,
-		thinning: 0.6,
-		smoothing: 0.5,
-		streamline: 0.5,
-		simulatePressure: true,
-	});
-	if (stroke.length < 2) return null;
-	return svgPathFromPolygon(stroke);
+	const stroke = getStroke(inputPoints, STROKE_OPTIONS) as Array<
+		[number, number]
+	>;
+	return stroke.length < 2 ? null : stroke;
+}
+
+/** Smoothed SVG path string for the stroke — the outline polygon
+ *  rendered as quadratic Béziers.
+ *
+ *  Called by `OcifPath` on every render — pure function of
+ *  `points`, so memoize on the array reference. */
+export function svgPathFromPoints(points: number[]): string | null {
+	const stroke = outlineFromPoints(points);
+	return stroke ? svgPathFromPolygon(stroke) : null;
 }
 
 /** Bounds of the smoothed stroke in input-coord space. Returns
@@ -90,20 +102,8 @@ export function svgPathFromPoints(points: number[]): string | null {
 export function pathBoundsFromPoints(
 	points: number[],
 ): { minX: number; minY: number; width: number; height: number } | null {
-	if (points.length < 6) return null;
-	const inputPoints: Array<[number, number, number]> = [];
-	for (let i = 0; i + 2 < points.length; i += 3) {
-		inputPoints.push([points[i], points[i + 1], points[i + 2]]);
-	}
-	if (inputPoints.length < 2) return null;
-	const stroke = getStroke(inputPoints, {
-		size: 6,
-		thinning: 0.6,
-		smoothing: 0.5,
-		streamline: 0.5,
-		simulatePressure: true,
-	});
-	if (stroke.length < 2) return null;
+	const stroke = outlineFromPoints(points);
+	if (!stroke) return null;
 	let minX = Infinity;
 	let minY = Infinity;
 	let maxX = -Infinity;

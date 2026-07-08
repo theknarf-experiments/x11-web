@@ -3,19 +3,18 @@
 	pointer-events: none;
 }
 
-/* Hover affordance in pointer mode — a soft white halo around the
- * stroke so the user knows they can click to select it. The path
- * carries `pointer-events: all` (visible fill + transparent fat
- * stroke) which is what makes :hover fire anywhere in the
- * clickable region, not just the visible ink. */
+/* Hover affordance in pointer mode — the fat invisible hit stroke
+ * tints into a soft white band around the (GL-painted) ink so the
+ * user knows they can click to select it. A drop-shadow of the ink
+ * is no longer possible DOM-side: the visible fill lives in the GL
+ * shape layer and this SVG renders no pixels of its own. */
 .hitPath:hover {
-	filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.8));
+	stroke: rgba(255, 255, 255, 0.25);
 }
 
-/* Selection halo: bright blue outer glow on the SVG. Stronger
- * than hover so the two states are distinct. */
+/* Selection halo: blue band, stronger than hover so the two states
+ * read distinctly. */
 .selected .hitPath,
 .selected .hitPath:hover {
-	filter: drop-shadow(0 0 1px #007aff)
-		drop-shadow(0 0 5px rgba(0, 122, 255, 0.7));
+	stroke: rgba(0, 122, 255, 0.45);
 }

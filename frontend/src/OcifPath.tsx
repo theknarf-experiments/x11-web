@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import s from "./OcifPath.module.css";
-import { pathBoundsFromPoints, svgPathFromPoints } from "./workspaceSync";
 import type { OcifNode } from "./workspaceSync";
+import { pathBoundsFromPoints, svgPathFromPoints } from "./workspaceSync";
 
 interface OcifPathProps {
 	id: string;
@@ -14,17 +14,15 @@ interface OcifPathProps {
 	onPointerDown: (id: string, e: React.PointerEvent) => void;
 }
 
-const DEFAULT_FILL = "#ffffff";
-
-/** One `@ocif/path` node — a freehand stroke. The doc carries the
- *  raw input samples (flat `[x, y, p, ...]` triples in node-local
- *  coords); we run perfect-freehand here at render time to get the
- *  smoothed polygon outline and the matching SVG path string.
+/** One `@ocif/path` node's interactive hit area. The visible ink is
+ *  painted by the GL shape layer (see `shapeLayer.ts`); this SVG
+ *  carries only the invisible fat hit stroke for select/drag, which
+ *  doubles as the hover/selection halo by tinting on those states.
  *
- *  Bounds also come from the smoothed polygon — `node.x/y` is the
- *  anchor (the first sampled canvas point), but the polygon may
- *  extend in any direction from there, so the SVG container is
- *  positioned at `(node.x + bounds.minX, node.y + bounds.minY)`. */
+ *  Bounds come from the smoothed polygon — `node.x/y` is the anchor
+ *  (the first sampled canvas point), but the polygon may extend in
+ *  any direction from there, so the SVG container is positioned at
+ *  `(node.x + bounds.minX, node.y + bounds.minY)`. */
 export function OcifPath({
 	id,
 	node,
@@ -50,7 +48,6 @@ export function OcifPath({
 		[points],
 	);
 	if (!node.path || !pathStr || !bounds) return null;
-	const fill = node.path.fill_color ?? DEFAULT_FILL;
 	const className = selected ? s.selected : s.path;
 	return (
 		<div
@@ -79,17 +76,18 @@ export function OcifPath({
 			>
 				<path
 					d={pathStr}
-					fill={fill}
+					fill="transparent"
 					// Transparent wider stroke = invisible hit area
-					// around the visible ink so thin strokes stay
+					// around the (GL-painted) ink so thin strokes stay
 					// selectable without pixel-perfect aim. `all`
-					// pointer-events catches both the visible fill
-					// and the transparent stroke.
-					stroke={interactive ? "transparent" : "none"}
-					strokeWidth={interactive ? 16 : 0}
+					// pointer-events catches both the fill region and
+					// the stroke band. Hover/selected tint this stroke
+					// (see the module CSS) as the halo affordance.
+					stroke="transparent"
+					strokeWidth={16}
 					strokeLinecap="round"
 					strokeLinejoin="round"
-					className={interactive ? s.hitPath : undefined}
+					className={s.hitPath}
 					style={{
 						pointerEvents: interactive ? "all" : "none",
 						cursor: interactive ? "move" : undefined,

@@ -83,6 +83,12 @@ importers:
       '@tanstack/react-hotkeys':
         specifier: ^0.10.0
         version: 0.10.0(react-dom@19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324))(react@19.3.0-canary-3cb2c420-20260324)
+      '@x11-web/canvas-core':
+        specifier: workspace:*
+        version: link:../packages/canvas-core
+      '@x11-web/canvas-r3f':
+        specifier: workspace:*
+        version: link:../packages/canvas-r3f
       '@x11-web/components':
         specifier: workspace:*
         version: link:../packages/components
@@ -152,16 +158,16 @@ importers:
     dependencies:
       '@react-three/fiber':
         specifier: ^9.6.1
-        version: 9.6.1(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.185.1)
+        version: 9.6.1(@types/react@19.2.14)(react-dom@19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324))(react@19.3.0-canary-3cb2c420-20260324)(three@0.185.1)
       '@x11-web/canvas-core':
         specifier: workspace:*
         version: link:../canvas-core
       react:
-        specifier: '>=19'
-        version: 19.2.7
+        specifier: 19.3.0-canary-3cb2c420-20260324
+        version: 19.3.0-canary-3cb2c420-20260324
       react-dom:
-        specifier: '>=19'
-        version: 19.2.7(react@19.2.7)
+        specifier: 19.3.0-canary-3cb2c420-20260324
+        version: 19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324)
       three:
         specifier: ^0.185.1
         version: 0.185.1
@@ -4498,22 +4504,22 @@ snapshots:
 
   '@protobufjs/utf8@1.1.0': {}
 
-  '@react-three/fiber@9.6.1(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.185.1)':
+  '@react-three/fiber@9.6.1(@types/react@19.2.14)(react-dom@19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324))(react@19.3.0-canary-3cb2c420-20260324)(three@0.185.1)':
     dependencies:
       '@babel/runtime': 7.29.2
       '@types/webxr': 0.5.24
       base64-js: 1.5.1
       buffer: 6.0.3
-      its-fine: 2.0.0(@types/react@19.2.14)(react@19.2.7)
-      react: 19.2.7
-      react-use-measure: 2.1.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      its-fine: 2.0.0(@types/react@19.2.14)(react@19.3.0-canary-3cb2c420-20260324)
+      react: 19.3.0-canary-3cb2c420-20260324
+      react-use-measure: 2.1.7(react-dom@19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324))(react@19.3.0-canary-3cb2c420-20260324)
       scheduler: 0.27.0
-      suspend-react: 0.1.3(react@19.2.7)
+      suspend-react: 0.1.3(react@19.3.0-canary-3cb2c420-20260324)
       three: 0.185.1
-      use-sync-external-store: 1.6.0(react@19.2.7)
-      zustand: 5.0.14(@types/react@19.2.14)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
+      use-sync-external-store: 1.6.0(react@19.3.0-canary-3cb2c420-20260324)
+      zustand: 5.0.14(@types/react@19.2.14)(react@19.3.0-canary-3cb2c420-20260324)(use-sync-external-store@1.6.0(react@19.3.0-canary-3cb2c420-20260324))
     optionalDependencies:
-      react-dom: 19.2.7(react@19.2.7)
+      react-dom: 19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324)
     transitivePeerDependencies:
       - '@types/react'
       - immer
@@ -5824,10 +5830,10 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  its-fine@2.0.0(@types/react@19.2.14)(react@19.2.7):
+  its-fine@2.0.0(@types/react@19.2.14)(react@19.3.0-canary-3cb2c420-20260324):
     dependencies:
       '@types/react-reconciler': 0.28.9(@types/react@19.2.14)
-      react: 19.2.7
+      react: 19.3.0-canary-3cb2c420-20260324
     transitivePeerDependencies:
       - '@types/react'
 
@@ -6392,11 +6398,11 @@ snapshots:
 
   react-refresh@0.17.0: {}
 
-  react-use-measure@2.1.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+  react-use-measure@2.1.7(react-dom@19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324))(react@19.3.0-canary-3cb2c420-20260324):
     dependencies:
-      react: 19.2.7
+      react: 19.3.0-canary-3cb2c420-20260324
     optionalDependencies:
-      react-dom: 19.2.7(react@19.2.7)
+      react-dom: 19.3.0-canary-3cb2c420-20260324(react@19.3.0-canary-3cb2c420-20260324)
 
   react@19.2.7: {}
 
@@ -6697,9 +6703,9 @@ snapshots:
 
   supports-preserve-symlinks-flag@1.0.0: {}
 
-  suspend-react@0.1.3(react@19.2.7):
+  suspend-react@0.1.3(react@19.3.0-canary-3cb2c420-20260324):
     dependencies:
-      react: 19.2.7
+      react: 19.3.0-canary-3cb2c420-20260324
 
   symbol-tree@3.2.4: {}
 
@@ -6906,10 +6912,6 @@ snapshots:
     dependencies:
       registry-auth-token: 3.3.2
       registry-url: 3.1.0
-
-  use-sync-external-store@1.6.0(react@19.2.7):
-    dependencies:
-      react: 19.2.7
 
   use-sync-external-store@1.6.0(react@19.3.0-canary-3cb2c420-20260324):
     dependencies:
@@ -7131,8 +7133,8 @@ snapshots:
 
   zod@4.4.3: {}
 
-  zustand@5.0.14(@types/react@19.2.14)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7)):
+  zustand@5.0.14(@types/react@19.2.14)(react@19.3.0-canary-3cb2c420-20260324)(use-sync-external-store@1.6.0(react@19.3.0-canary-3cb2c420-20260324)):
     optionalDependencies:
       '@types/react': 19.2.14
-      react: 19.2.7
-      use-sync-external-store: 1.6.0(react@19.2.7)
+      react: 19.3.0-canary-3cb2c420-20260324
+      use-sync-external-store: 1.6.0(react@19.3.0-canary-3cb2c420-20260324)

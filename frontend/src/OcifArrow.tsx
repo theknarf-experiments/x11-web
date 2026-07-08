@@ -1,5 +1,5 @@
-import { useMemo } from "react";
 import { getBoxToBoxArrow } from "perfect-arrows";
+import { useMemo } from "react";
 import s from "./OcifArrow.module.css";
 import type { OcifNode } from "./workspaceSync";
 
@@ -29,8 +29,6 @@ interface OcifArrowProps {
 	) => void;
 }
 
-const DEFAULT_STROKE = "#ffffff";
-const DEFAULT_STROKE_WIDTH = 2;
 const HEAD_SIZE = 12;
 /** Invisible-but-clickable padding around the line so users don't
  *  have to hit the 2px stroke pixel-perfect. */
@@ -101,7 +99,7 @@ export function OcifArrow({
 		const maxY = Math.max(sBox.y + sBox.h, eBox.y + eBox.h) + SVG_MARGIN;
 		const width = maxX - minX;
 		const height = maxY - minY;
-		const [sx, sy, cx, cy, ex, ey, ae] = getBoxToBoxArrow(
+		const [sx, sy, cx, cy, ex, ey] = getBoxToBoxArrow(
 			sBox.x - minX,
 			sBox.y - minY,
 			sBox.w,
@@ -120,28 +118,14 @@ export function OcifArrow({
 			path: `M${sx},${sy} Q${cx},${cy} ${ex},${ey}`,
 			endX: ex,
 			endY: ey,
-			endDeg: ae * (180 / Math.PI),
-			// Tangent direction at the start, derived from the
-			// quadratic Bézier control point. The arrowhead points
-			// outward (away from the shape), so 180° flip from the
-			// tangent.
 			startX: sx,
 			startY: sy,
-			startDeg: Math.atan2(sy - cy, sx - cx) * (180 / Math.PI),
 			startAttached: !!startNode,
 			endAttached: !!endNode,
 		};
 	}, [node.arrow, node.edge, nodes]);
 
 	if (!node.arrow || !layout) return null;
-
-	const stroke = node.arrow.stroke_color ?? DEFAULT_STROKE;
-	const strokeWidth = node.arrow.stroke_width ?? DEFAULT_STROKE_WIDTH;
-	// Spec defaults are "none" both ends; we flip the end default
-	// to "arrowhead" to keep the visual continuity with how arrows
-	// were originally drawn here.
-	const startMarker = node.arrow.start_marker ?? "none";
-	const endMarker = node.arrow.end_marker ?? "arrowhead";
 
 	return (
 		<div
@@ -162,8 +146,10 @@ export function OcifArrow({
 				height={layout.height}
 				viewBox={`0 0 ${layout.width} ${layout.height}`}
 			>
-				{/* Wide invisible hit path under the visible stroke so
-				 *  the user can click anywhere near the line. */}
+				{/* Wide invisible hit path along the (GL-painted) stroke
+				 *  so the user can click anywhere near the line. The
+				 *  visible curve and arrowheads render in the GL shape
+				 *  layer (see shapeLayer.ts). */}
 				<path
 					d={layout.path}
 					fill="none"
@@ -177,30 +163,6 @@ export function OcifArrow({
 						onPointerDown(id, e);
 					}}
 				/>
-				<path
-					d={layout.path}
-					fill="none"
-					stroke={stroke}
-					strokeWidth={strokeWidth}
-					strokeLinecap="round"
-					pointerEvents="none"
-				/>
-				{endMarker === "arrowhead" && (
-					<polygon
-						points={`0,-${HEAD_SIZE / 2} ${HEAD_SIZE},0 0,${HEAD_SIZE / 2}`}
-						fill={stroke}
-						transform={`translate(${layout.endX},${layout.endY}) rotate(${layout.endDeg})`}
-						pointerEvents="none"
-					/>
-				)}
-				{startMarker === "arrowhead" && (
-					<polygon
-						points={`0,-${HEAD_SIZE / 2} ${HEAD_SIZE},0 0,${HEAD_SIZE / 2}`}
-						fill={stroke}
-						transform={`translate(${layout.startX},${layout.startY}) rotate(${layout.startDeg})`}
-						pointerEvents="none"
-					/>
-				)}
 				{selected && interactive && (
 					<>
 						<circle

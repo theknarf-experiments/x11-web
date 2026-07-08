@@ -7,8 +7,8 @@ import {
 	windowsForProcess,
 } from "./db";
 import type { FocusPolicy, InputEvent } from "./types";
-import { raiseOcifNode, setOcifNodePosition } from "./workspaceSync";
 import type { OcifNode } from "./workspaceSync";
+import { raiseOcifNode, setOcifNodePosition } from "./workspaceSync";
 
 let requestCounter = 0;
 function nextRequestId(): string {

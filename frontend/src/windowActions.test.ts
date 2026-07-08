@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { act, createElement, useImperativeHandle } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // biome-ignore lint/suspicious/noExplicitAny: test-only flag
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;

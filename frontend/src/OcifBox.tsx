@@ -35,22 +35,18 @@ interface OcifBoxProps {
 	onExitEdit: () => void;
 }
 
-const DEFAULT_FILL = "transparent";
-const DEFAULT_STROKE = "#ffffff";
-const DEFAULT_STROKE_WIDTH = 2;
 const DEFAULT_RADIUS = 6;
 
 const HANDLES: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
-/** One `@ocif/rect` node rendered as an absolute-positioned div in
- *  canvas space. The fill and stroke are drawn by an inline SVG
- *  `<rect>` (matching OcifArrow / OcifPath, which are SVG-stroked)
- *  rather than a CSS border. The rect is inset by half the stroke
- *  width so the stroke's outer edge lands exactly on the doc-stored
- *  OCIF bounds — same invariant the old `border-box` border kept.
- *  The border-radius is a render-time treatment — not part of the
- *  `@ocif/rect` spec — so it stays out of the doc; it remains on the
- *  div too so the selection halo (box-shadow) follows the corners. */
+/** One `@ocif/rect` node's interactive DOM shell. The fill and
+ *  stroke are painted by the GL shape layer (`@x11-web/canvas-r3f`,
+ *  see `shapeLayer.ts`) beneath the DOM; this div is an invisible
+ *  hit target carrying the pointer handling, selection halo, resize
+ *  handles and text layer at the same canvas-space bounds. The
+ *  border-radius is a render-time treatment — not part of the
+ *  `@ocif/rect` spec — kept here so the halo (box-shadow) follows
+ *  the corners the GL rect draws. */
 export function OcifBox({
 	id,
 	node,
@@ -81,15 +77,7 @@ export function OcifBox({
 		},
 		[id, onPointerDown, editing, interactive],
 	);
-	const fill = node.rect?.fill_color ?? DEFAULT_FILL;
-	const stroke = node.rect?.stroke_color ?? DEFAULT_STROKE;
-	const strokeWidth = node.rect?.stroke_width ?? DEFAULT_STROKE_WIDTH;
 	const className = dropTarget ? s.dropTarget : selected ? s.selected : s.box;
-	// SVG strokes are centered on the path; inset the rect by half the
-	// stroke so its outer edge sits on the box bounds. Sizes clamp to
-	// 0 for the degenerate frames mid drag-create.
-	const inset = strokeWidth / 2;
-	const rectRadius = Math.max(0, DEFAULT_RADIUS - inset);
 	return (
 		<div
 			data-testid="ocif-box"
@@ -107,18 +95,6 @@ export function OcifBox({
 			}}
 			onPointerDown={handlePointerDown}
 		>
-			<svg className={s.shape} aria-hidden="true" width="100%" height="100%">
-				<rect
-					x={inset}
-					y={inset}
-					width={Math.max(0, node.width - strokeWidth)}
-					height={Math.max(0, node.height - strokeWidth)}
-					rx={rectRadius}
-					fill={fill}
-					stroke={stroke}
-					strokeWidth={strokeWidth}
-				/>
-			</svg>
 			<OcifTextLayer
 				id={id}
 				text={node.text ?? ""}

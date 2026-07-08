@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { Message } from "capnp-es";
-import { describe, expect, test, vi } from "vitest";
 import { act, createElement, useImperativeHandle, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { Frame } from "./generated/wire";
+import { describe, expect, test, vi } from "vitest";
 import { useFrameRouter } from "./frameRouter";
+import { Frame } from "./generated/wire";
 
 // React 19's `act(...)` shouts at us without this opt-in.
 // biome-ignore lint/suspicious/noExplicitAny: test-only flag
