@@ -309,7 +309,12 @@ export function WindowFrame({
 					onPointerDown={(e) => {
 						e.stopPropagation();
 						onFocus();
-						e.currentTarget.focus();
+						// preventScroll: plain focus() scroll-into-views inside the
+						// overflow-hidden viewport, silently shifting all canvas
+						// content ~100px mid-click for windows taller than the
+						// viewport — the click then lands at the wrong X coords
+						// (Firefox was the only app big enough to trigger it).
+						e.currentTarget.focus({ preventScroll: true });
 					}}
 					onMouseMove={handleMouseMove}
 					onMouseDown={handleMouseDown}
@@ -348,7 +353,7 @@ export function WindowFrame({
 				onFocus();
 				handleTitlePointerDown(e);
 			}}
-			onClick={() => canvasRef.current?.focus()}
+			onClick={() => canvasRef.current?.focus({ preventScroll: true })}
 			data-testid="window-frame"
 			data-client-id={clientId}
 			data-wm-state={wmState}
@@ -418,7 +423,12 @@ export function WindowFrame({
 				onPointerDown={(e) => {
 					e.stopPropagation();
 					onFocus();
-					e.currentTarget.focus();
+					// preventScroll: plain focus() scroll-into-views inside the
+					// overflow-hidden viewport, silently shifting all canvas
+					// content ~100px mid-click for windows taller than the
+					// viewport — the click then lands at the wrong X coords
+					// (Firefox was the only app big enough to trigger it).
+					e.currentTarget.focus({ preventScroll: true });
 				}}
 				onMouseMove={handleMouseMove}
 				onMouseDown={handleMouseDown}

@@ -151,6 +151,16 @@ export function InfiniteCanvas({
 		};
 		const onPointerEnd = (e: PointerEvent) => pinch.up(e.pointerId);
 
+		// overflow:hidden still scrolls programmatically (focus()'s
+		// scroll-into-view, scrollTo, …), which silently shifts the DOM
+		// content out of sync with the camera — and with any GL layer
+		// following the same camera. Snap it back immediately.
+		const onScroll = () => {
+			el.scrollTop = 0;
+			el.scrollLeft = 0;
+		};
+		el.addEventListener("scroll", onScroll);
+
 		el.addEventListener("wheel", onWheel, { passive: false });
 		el.addEventListener("pointerdown", onPointerDown);
 		// Move/up on window: pinching fingers routinely wander off the
@@ -159,6 +169,7 @@ export function InfiniteCanvas({
 		window.addEventListener("pointerup", onPointerEnd);
 		window.addEventListener("pointercancel", onPointerEnd);
 		return () => {
+			el.removeEventListener("scroll", onScroll);
 			el.removeEventListener("wheel", onWheel);
 			el.removeEventListener("pointerdown", onPointerDown);
 			window.removeEventListener("pointermove", onPointerMove);
