@@ -62,7 +62,12 @@ Files written from scratch (not derived)
 
     src/lib.rs, src/server.rs, src/router.rs, src/windows.rs,
     src/input.rs, src/pixels.rs, src/translate.rs, src/decoration.rs,
-    examples/headless.rs
+    examples/headless.rs, test-tools/wl-input-probe.c
+
+test-tools/wl-input-probe.c is a plain libwayland-client program (no
+smithay, no waylandcraft code) written for this repository's e2e
+suite. It is compiled into the sidecar image by
+Dockerfile.sidecar-wayland, not by cargo.
 
 Note
 ----

@@ -53,10 +53,13 @@ export default function globalTeardown() {
 	// Kill any orphaned `serve` processes spawned from e2e (one per worker).
 	run("pkill -f 'serve dist -l .* --no-clipboard' || true");
 
-	// Drop the per-worker Docker networks created by fixtures.ts.
+	// Drop the per-worker Docker networks created by the fixtures
+	// modules: `x11web-worker-*` (tests/fixtures.ts) and
+	// `x11web-wl-worker-*` (tests/wayland/fixtures.ts). Substring
+	// filter, so the shorter prefix covers both.
 	const networks = (() => {
 		try {
-			return execSync(`docker network ls --filter "name=x11web-worker-" -q`, {
+			return execSync(`docker network ls --filter "name=x11web-" -q`, {
 				encoding: "utf-8",
 				timeout: 10_000,
 			}).trim();

@@ -403,6 +403,16 @@ fn composite_and_emit(
         trace!(uuid = %entry.uuid, "skipping short PutImage crop");
         return;
     }
+    // The one observable trace of the pixel path. With no backend
+    // attached the updates just queue in the channel, so this line is
+    // the only way a container smoke test (e2e/scripts/wayland-smoke.sh)
+    // can prove pixels were produced rather than merely that a window
+    // mapped. `trace!` because it fires up to 60x/s per window.
+    trace!(
+        uuid = %entry.uuid,
+        x = rect.x, y = rect.y, w = rect.w, h = rect.h,
+        "emitting PutImage",
+    );
     send(
         update_tx,
         &entry.client_id,

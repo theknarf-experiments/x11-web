@@ -59,6 +59,40 @@ services:
     volumes:
       - ${HOME}/.x11web-fingerprint:/run/secrets/x11web-fingerprint:ro
 
+  # Wayland sidecar. Behind a profile so `docker compose up sidecar`
+  # and `--profile full` are byte-identical to what they were before
+  # this service existed — the mprocs dev loop only ever wants one
+  # sidecar, and two of them on the same backend make the Dock render
+  # two spawn buttons.
+  #
+  #   docker compose --profile wayland up sidecar-wayland
+  sidecar-wayland:
+    profiles: [wayland]
+    build:
+      context: .
+      dockerfile: Dockerfile.sidecar-wayland
+    hostname: x11web-wayland
+    environment:
+      # Same reasoning as `sidecar` above: `host.docker.internal`
+      # reaches the backend in both the mprocs and full-stack
+      # topologies.
+      BACKEND_QUIC_ADDR: host.docker.internal:3002
+      BACKEND_SERVER_NAME: localhost
+      X11WEB_FINGERPRINT_FILE: /run/secrets/x11web-fingerprint
+      SIDECAR_NAME: dev-wayland-sidecar
+      # No DISPLAY_NUMBER — there is no X server (and no XWayland) in
+      # this image. The compositor picks its own socket name
+      # (wayland-1..wayland-32) and exports it to children.
+      WAYLAND_SCREEN_SIZE: 1280x800
+      RUST_LOG: info
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${HOME}/.x11web-fingerprint:/run/secrets/x11web-fingerprint:ro
+
   frontend:
     profiles: [full]
     build:

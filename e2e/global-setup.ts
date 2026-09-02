@@ -46,10 +46,14 @@ function reapOrphans() {
 		}
 	}
 
-	// Per-worker networks (`x11web-worker-*`) created by fixtures.ts.
+	// Per-worker networks created by the fixtures modules:
+	// `x11web-worker-*` (tests/fixtures.ts) and `x11web-wl-worker-*`
+	// (tests/wayland/fixtures.ts). The filter is a substring match, so
+	// the shorter `x11web-` prefix covers both — and matches nothing
+	// else (compose's own network is `x11-web_default`).
 	const nets = (() => {
 		try {
-			return execSync(`docker network ls --filter "name=x11web-worker-" -q`, {
+			return execSync(`docker network ls --filter "name=x11web-" -q`, {
 				encoding: "utf-8",
 				timeout: 10_000,
 			}).trim();

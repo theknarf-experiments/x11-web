@@ -77,6 +77,30 @@ procs:
       docker compose rm -fs sidecar >/dev/null 2>&1 || true
       docker compose up --build sidecar
 
+  # Wayland sidecar (Linux container) — same wiring as sidecar-x11
+  # but serving Wayland clients through the embedded smithay
+  # compositor instead of the X11 server.
+  #
+  # `autostart: false` on purpose: the Dock renders one spawn button
+  # per connected sidecar, so running this alongside sidecar-x11 puts
+  # two of them in the UI. Select this pane and press `s` when you
+  # want Wayland instead — and stop sidecar-x11 first.
+  sidecar-wayland:
+    autostart: false
+    stop:
+      send-keys: ["<C-c>"]
+    env:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:5081/api/default
+      OTEL_EXPORTER_OTLP_HEADERS: "authorization=Basic YWRtaW5AYWRtaW4uY29tOmFkbWlu,organization=default,stream-name=default"
+      OTEL_SERVICE_NAME: x11-web-sidecar-wayland
+    shell: |
+      set -e
+      printf 'Waiting for backend fingerprint at %s/.x11web-fingerprint…\n' "$HOME"
+      while [ ! -s "$HOME/.x11web-fingerprint" ]; do sleep 0.2; done
+      # Same stale-network guard as sidecar-x11 above.
+      docker compose --profile wayland rm -fs sidecar-wayland >/dev/null 2>&1 || true
+      docker compose --profile wayland up --build sidecar-wayland
+
   # macOS sidecar — connects to the backend over QUIC :3002. Builds
   # the .app bundle (stable codesign identity for TCC), waits for
   # the backend to write its fingerprint to

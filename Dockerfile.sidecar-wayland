@@ -1,0 +1,149 @@
+# Wayland sidecar image — the Wayland counterpart of Dockerfile.sidecar.
+#
+# Multi-arch: works natively on both amd64 and arm64. Nothing here
+# needs /dev/dri, a GPU, a seat or logind — the embedded compositor is
+# wl_shm-only software rendering, which is exactly why the dmabuf/EGL
+# half of upstream waylandcraft was dropped.
+#
+# Three stages:
+#   builder  — cargo build of the sidecar binary
+#   clients  — the Wayland test clients (compiled probe + weston-simple-shm)
+#   runtime  — debian:bookworm-slim with only the shared libraries those
+#              two need, plus the runtime's own xkb data
+FROM rust:1-bookworm AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    # libxkbcommon: the seat compiles an xkb keymap at startup and
+    # serialises it to the client over wl_keyboard.keymap.
+    libxkbcommon-dev \
+    # capnproto: needed by `x11-web-wire`'s build.rs to codegen
+    # Rust bindings from `wire.capnp`.
+    capnproto \
+    && rm -rf /var/lib/apt/lists/*
+# Deliberately NOT installed (contrast with Dockerfile.sidecar):
+# libosmesa6-dev and cmake. There is no GL in this sidecar and no
+# bundled-freetype build — x11-web-x11-server, which needs both, is
+# stubbed out below.
+WORKDIR /app
+ARG CACHE_BUST=0
+COPY Cargo.toml Cargo.lock ./
+# The workspace root's [patch.crates-io] redirects `x11rb-protocol` at
+# ./tools/x11rb-fork/x11rb-protocol. Cargo resolves patches for the
+# WHOLE workspace, so the fork must exist even though nothing in this
+# image touches x11rb. Same script, same inputs, same layer-cache
+# behaviour as Dockerfile.sidecar.
+COPY tools/setup-x11rb-fork.sh tools/setup-x11rb-fork.sh
+COPY crates/x11rb-protocol-msb/ crates/x11rb-protocol-msb/
+# Bookworm's git 2.39 speaks HTTP/2 and advertises `br, zstd` in
+# Accept-Encoding without being able to decode either. Behind a
+# TLS-terminating proxy that takes those encodings at face value the
+# ref advertisement comes back unreadable, git decides it must need
+# credentials, and the clone dies with the very misleading
+#   fatal: could not read Username for 'https://github.com'
+# even though plain `curl` of the same URL returns 200. Pinning
+# HTTP/1.1 sidesteps the whole class; it costs one extra round trip on
+# a clone that happens once per image build. (Verified against this
+# exact failure — without it, the layer below fails on a proxied host.)
+RUN git config --global http.version HTTP/1.1
+RUN bash tools/setup-x11rb-fork.sh
+# Only the crates x11-web-sidecar-wayland actually depends on.
+COPY crates/sidecar-wayland/ crates/sidecar-wayland/
+COPY crates/wayland-server/ crates/wayland-server/
+COPY crates/protocol/ crates/protocol/
+COPY crates/wire/ crates/wire/
+COPY crates/pixel-codec/ crates/pixel-codec/
+COPY crates/telemetry/ crates/telemetry/
+# Stub the workspace members this binary doesn't depend on so `cargo
+# build` can resolve the workspace manifest without them. The stub name
+# is `x11-web-<dirname>`, which is why every crate directory is named to
+# match its package. Note `sidecar` and `x11-server` are stubbed HERE
+# (they are the ones Dockerfile.sidecar copies), and `sidecar-wayland` /
+# `wayland-server` are stubbed THERE — the two images are mirror images
+# of each other.
+RUN for crate in backend auth rtc-wire ws-wire sidecar-macos sidecar x11-server; do \
+      mkdir -p crates/$crate/src; \
+      printf '[package]\nname = "x11-web-%s"\nversion = "0.1.0"\nedition = "2021"\n' "$crate" \
+        > crates/$crate/Cargo.toml; \
+      printf 'fn main() {}\n' > crates/$crate/src/main.rs; \
+    done
+RUN cargo build --release --bin x11-web-sidecar-wayland
+
+# Wayland test clients. Both end up as single small binaries whose only
+# non-libc dependencies are libwayland-client0 and libxkbcommon0, so the
+# runtime stage stays thin.
+FROM debian:bookworm-slim AS clients
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libc6-dev pkg-config \
+    libwayland-dev libwayland-bin wayland-protocols libxkbcommon-dev \
+    && rm -rf /var/lib/apt/lists/*
+# wl-input-probe: the deterministic input client the e2e spec asserts
+# on. xdg-shell has no C library — wayland-scanner generates the header
+# and the protocol marshalling code from the XML that
+# `wayland-protocols` ships.
+COPY crates/wayland-server/test-tools/wl-input-probe.c /tmp/
+RUN XDG=/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml && \
+    wayland-scanner client-header "$XDG" /tmp/xdg-shell-client-protocol.h && \
+    wayland-scanner private-code "$XDG" /tmp/xdg-shell-protocol.c && \
+    gcc -O2 -o /usr/local/bin/wl-input-probe \
+        /tmp/wl-input-probe.c /tmp/xdg-shell-protocol.c -I/tmp \
+        $(pkg-config --cflags --libs wayland-client xkbcommon)
+# weston-simple-shm: the reference "does a real third-party client
+# render through this compositor" case, and it animates continuously so
+# PutImage traffic is guaranteed. Lifted out of the .deb rather than
+# apt-installed: `apt-get install weston` drags in libweston-10-0 and
+# with it libavcodec59, libfreerdp2-2, libpipewire and libgstreamer,
+# none of which a headless shm compositor's test client needs. The
+# binary's only non-libc dependency is libwayland-client0.
+RUN apt-get update && \
+    cd /tmp && apt-get download weston && \
+    dpkg-deb -x /tmp/weston_*.deb /tmp/weston-pkg && \
+    cp /tmp/weston-pkg/usr/bin/weston-simple-shm /usr/local/bin/ && \
+    rm -rf /var/lib/apt/lists/* /tmp/weston_*.deb /tmp/weston-pkg
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # The two libraries every client in this image links against.
+    libwayland-client0 \
+    libxkbcommon0 \
+    # MANDATORY: the seat compiles a keymap from these rules at
+    # startup. Without xkb-data `WaylandServer::new` fails and the
+    # sidecar exits 1 immediately.
+    xkb-data \
+    # GTK/Qt children still use the session bus under Wayland for
+    # AppMenu export, notifications and portal lookups. Optional —
+    # its absence is one WARN line — but cheap.
+    dbus \
+    # pgrep/ps for the e2e readiness probe and for debugging.
+    procps \
+    ca-certificates \
+    fontconfig \
+    fonts-dejavu-core \
+    # wayland-info: the free protocol-inventory smoke test.
+    wayland-utils \
+    # foot: a real, pure-shm terminal for manual poking at the sidecar.
+    # Not used by the e2e spec (wl-input-probe is the deterministic
+    # client); kept because a terminal is the fastest way to eyeball
+    # keyboard delivery by hand.
+    foot \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/x11-web-sidecar-wayland /usr/local/bin/
+COPY --from=clients /usr/local/bin/wl-input-probe /usr/local/bin/wl-input-probe
+COPY --from=clients /usr/local/bin/weston-simple-shm /usr/local/bin/weston-simple-shm
+COPY crates/sidecar-wayland/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# The wayland socket lives here. Created at build time as well as by
+# the entrypoint and by the library, because `ListeningSocket::bind`
+# fails outright without it and that failure kills the compositor
+# before any client can connect. 0700 is required: libwayland warns
+# about a group/world-accessible runtime dir and some toolkits refuse
+# it outright.
+RUN mkdir -p /run/user/0 && chmod 700 /run/user/0
+ENV XDG_RUNTIME_DIR=/run/user/0
+ENV RUST_LOG=info
+# Fixed hostname so `foot`'s prompt is deterministic, and so
+# SIDECAR_NAME's $HOSTNAME fallback is stable.
+RUN echo "x11web-wayland" > /etc/hostname
+ENV HOSTNAME=x11web-wayland
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
