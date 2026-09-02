@@ -28,6 +28,8 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "linux")]
+mod process;
 
 #[cfg(target_os = "linux")]
 #[tokio::main]
