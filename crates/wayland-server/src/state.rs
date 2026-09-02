@@ -16,6 +16,7 @@
 // pid the backend's process bookkeeping needs.
 
 use std::collections::HashMap;
+use std::io;
 
 use smithay::delegate_compositor;
 use smithay::delegate_shm;
@@ -48,7 +49,9 @@ use x11_web_protocol::{DisplayUpdate, WindowWmState};
 
 use crate::output::WlcOutput;
 use crate::router::WindowRouter;
+use crate::seat::SeatState;
 use crate::surface::{self, SurfaceBuffer};
+use crate::translate::ModifierSynth;
 use crate::windows::{self, WindowKind, WindowRegistry};
 use crate::TaggedDisplayUpdate;
 
@@ -79,6 +82,12 @@ pub(crate) struct State {
     pub shm_state: ShmState,
     pub xdg_state: XdgShellState,
     pub output: WlcOutput,
+    pub seat: SeatState,
+    /// Reconciles the frontend's X11 modifier mask against the modifier
+    /// keys that actually arrived. Lives on `State` rather than on the
+    /// seat because it is a property of the *embedder's* protocol, not
+    /// of Wayland: a second input source would want its own.
+    pub modifiers: ModifierSynth,
 
     /// Live pixel copies, keyed by `wl_surface` object id. Includes
     /// subsurfaces, which is why this is separate from `windows`.
@@ -109,7 +118,7 @@ impl State {
         client_connected_tx: UnboundedSender<(String, u32)>,
         router: WindowRouter,
         screen_size: (u16, u16),
-    ) -> Self {
+    ) -> io::Result<Self> {
         let compositor_state = CompositorState::new::<State>(&dh);
         // `vec![]` is the complete accepted format set, not an empty
         // one: wl_shm mandates ARGB8888 and XRGB8888, so they are
@@ -123,17 +132,23 @@ impl State {
         let output = WlcOutput::new(&dh, screen_size);
         output.create_global();
 
-        // NOTE (STAGE: Input): wl_seat is deliberately NOT advertised
-        // yet. A global with no `Dispatch` impl behind it is worse
-        // than a missing one — clients bind it, then die on the first
-        // request. `seat.rs` adds the globals and the impls together.
+        // The seat compiles an xkb keymap, which is the one part of
+        // building this state that can fail for an environmental
+        // reason (no `xkb-data` in the image, a bad
+        // `XKB_DEFAULT_LAYOUT`). It is also the only global whose
+        // construction has to happen before it is advertised, since
+        // the keymap fd goes out with the first `get_keyboard`.
+        let seat = SeatState::new()?;
+        seat.create_globals(&dh);
 
-        Self {
+        Ok(Self {
             dh,
             compositor_state,
             shm_state,
             xdg_state,
             output,
+            seat,
+            modifiers: ModifierSynth::new(),
             surfaces: HashMap::new(),
             windows: WindowRegistry::default(),
             update_tx,
@@ -142,7 +157,7 @@ impl State {
             viewporter_state,
             single_pixel_buffer_state,
             xdg_decoration_state,
-        }
+        })
     }
 
     /// The UUID minted for the client that owns this surface.
@@ -286,11 +301,21 @@ impl XdgShellHandler for State {
         popup.send_repositioned(token);
     }
 
-    /// Popup grabs are how menus get keyboard focus and dismiss-on-
-    /// click-outside. Neither exists in this slice (there is no seat
-    /// yet), and refusing the grab is legal — the client keeps the
-    /// popup up and dismisses it on its own logic.
-    fn grab(&mut self, _popup: PopupSurface, _seat: WlSeat, _serial: Serial) {}
+    /// Popup grabs are how menus get keyboard focus and
+    /// dismiss-on-click-outside. Accepting one properly means keeping a
+    /// grab *stack* (nested submenus) and rerouting every subsequent
+    /// pointer and key event through it, which is a second focus model
+    /// living alongside the browser-dictated one in `input.rs` — well
+    /// outside this slice.
+    ///
+    /// Silently declining is the sanctioned degradation: the protocol
+    /// lets a compositor ignore the grab, and the client keeps the
+    /// popup up and dismisses it on its own logic. What is lost is
+    /// keyboard navigation of menus and auto-dismiss on an outside
+    /// click; the frontend's own click handling covers the latter.
+    fn grab(&mut self, _popup: PopupSurface, _seat: WlSeat, _serial: Serial) {
+        trace!("declining popup grab; this compositor has no grab stack");
+    }
 
     fn maximize_request(&mut self, toplevel: ToplevelSurface) {
         let size = self.output.size();

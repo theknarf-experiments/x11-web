@@ -31,8 +31,9 @@ use smithay::utils::Size;
 use smithay::wayland::compositor::CompositorClientState;
 use smithay::wayland::socket::ListeningSocketSource;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, warn};
 
+use crate::input;
 use crate::router::{Command, WindowRouter};
 use crate::state::{State, WaylandClientData};
 use crate::windows;
@@ -217,13 +218,16 @@ fn compositor_thread(
     };
     let socket_name = socket.socket_name().to_string_lossy().into_owned();
 
-    let mut state = State::new(
+    let mut state = match State::new(
         dh.clone(),
         update_tx,
         client_connected_tx,
         window_router.clone(),
         screen_size,
-    );
+    ) {
+        Ok(s) => s,
+        Err(e) => bail!("building compositor state", e),
+    };
 
     let handle = event_loop.handle();
 
@@ -300,9 +304,12 @@ fn compositor_thread(
         bail!("inserting render timer", e);
     }
 
-    // STAGE: Input — `state.seat.activate_keyboard()` belongs here,
-    // once. `kb_active` defaults to false in the ported seat and
-    // every key event is silently swallowed until it is set.
+    // Exactly once, and load-bearing: `kb_active` starts false in the
+    // ported seat, and while it is false `keyboard_key` returns before
+    // it touches the wire. Every stage of the pipeline — router,
+    // command channel, focus, xkb — would keep working and no key
+    // would ever reach a client, with nothing logged anywhere.
+    state.seat.activate_keyboard();
 
     if ready_tx.send(Ok(socket_name.clone())).is_err() {
         // `new()` gave up on us (it can only do that by panicking),
@@ -397,11 +404,7 @@ fn apply_command(state: &mut State, cmd: Command) {
             state.output.resize(width as i32, height as i32);
         }
         Command::Input { window_id, event } => {
-            // STAGE: Input — `input::apply(state, &window_id, event)`.
-            // The route is live (the window is tracked, the command
-            // arrives here); only the seat that would consume it is
-            // missing.
-            trace!(%window_id, ?event, "input event dropped: no seat yet (STAGE: Input)");
+            input::apply(state, &window_id, event);
         }
     }
 }

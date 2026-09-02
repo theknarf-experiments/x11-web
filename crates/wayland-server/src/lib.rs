@@ -59,9 +59,13 @@ pub mod translate;
 #[cfg(target_os = "linux")]
 mod decoration;
 #[cfg(target_os = "linux")]
+mod input;
+#[cfg(target_os = "linux")]
 mod output;
 #[cfg(target_os = "linux")]
 mod router;
+#[cfg(target_os = "linux")]
+mod seat;
 #[cfg(target_os = "linux")]
 mod server;
 #[cfg(target_os = "linux")]

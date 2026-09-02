@@ -39,11 +39,13 @@ use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::compositor::{with_surface_tree_upward, TraversalAction};
+use smithay::wayland::shell::xdg::XdgShellState;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, trace};
 use x11_web_protocol::{DisplayUpdate, WindowWmState};
 
 use crate::pixels::{self, DamageAccumulator, Rect, BPP};
+use crate::seat::SeatState;
 use crate::state::State;
 use crate::surface;
 use crate::TaggedDisplayUpdate;
@@ -178,6 +180,7 @@ pub(crate) fn tick(state: &mut State) {
         windows,
         update_tx,
         router,
+        seat,
         ..
     } = state;
 
@@ -236,14 +239,9 @@ pub(crate) fn tick(state: &mut State) {
         };
         let (root_w, root_h) = root_buf.logical_size();
 
-        // The window rectangle is the client's declared window
-        // geometry when it set one (CSD clients point it at the
-        // content, excluding their shadow), else the whole root
-        // buffer. Everything below is in *window* coordinates, i.e.
-        // surface coordinates minus this rectangle's origin.
-        let geo = surface::xdg_window_geometry(root)
-            .and_then(|g| g.clip(root_w, root_h))
-            .unwrap_or(Rect::new(0, 0, root_w, root_h));
+        // Everything below is in *window* coordinates, i.e. surface
+        // coordinates minus this rectangle's origin.
+        let geo = window_rect(root, root_w, root_h);
         let (w, h) = (
             geo.w.clamp(1, u16::MAX as i32),
             geo.h.clamp(1, u16::MAX as i32),
@@ -265,14 +263,22 @@ pub(crate) fn tick(state: &mut State) {
             entry.created = true;
             entry.mapped = true;
             entry.title = surface::toplevel_label(root).unwrap_or_default();
+            let is_toplevel = entry.kind == WindowKind::Toplevel;
             emit_map(update_tx, entry);
             // Only now is the window addressable from the embedder.
             // Tracking earlier would let input reach a window with no
             // size and no pixels.
             router.track(&entry.uuid);
-            focus_after_map(windows, update_tx, &id);
-            // `focus_after_map` may have taken a &mut borrow of the
-            // registry, so re-acquire the entry.
+            // Focus the newly-mapped toplevel. Popups are skipped:
+            // `apply_focus` resolves its argument against the toplevel
+            // list, so a popup id would resolve to no surface and
+            // unfocus the keyboard — a menu opening would take the
+            // keyboard away from the application that opened it.
+            if is_toplevel {
+                apply_focus(xdg_state, windows, seat, update_tx, Some(id.clone()));
+            }
+            // `apply_focus` took a &mut borrow of the registry, so
+            // re-acquire the entry.
             let Some(entry) = windows.entries.get_mut(&id) else {
                 continue;
             };
@@ -457,37 +463,17 @@ fn emit_map(tx: &UnboundedSender<TaggedDisplayUpdate>, entry: &WindowEntry) {
     }
 }
 
-/// Focus a newly-mapped toplevel. Popups take pointer focus by
-/// position but never steal the keyboard.
-fn focus_after_map(
-    windows: &mut WindowRegistry,
-    tx: &UnboundedSender<TaggedDisplayUpdate>,
-    id: &ObjectId,
-) {
-    let is_toplevel = windows
-        .entries
-        .get(id)
-        .is_some_and(|e| e.kind == WindowKind::Toplevel);
-    if !is_toplevel {
-        return;
-    }
-    windows.focused = Some(id.clone());
-    if let Some(entry) = windows.entries.get(id) {
-        send(
-            tx,
-            &entry.client_id,
-            DisplayUpdate::WindowRaised {
-                window_id: entry.uuid.clone(),
-            },
-        );
-        send(
-            tx,
-            &entry.client_id,
-            DisplayUpdate::WindowFocused {
-                window_id: Some(entry.uuid.clone()),
-            },
-        );
-    }
+/// The rectangle of the root surface that *is* the window.
+///
+/// `xdg_surface.set_window_geometry` when the client set one — GTK and
+/// Qt allocate a larger buffer and put their drop shadow in the margin,
+/// then point geometry at the inner rectangle — else the whole buffer.
+/// Shared with `input::hit_test`, which has to subtract the same origin
+/// or every click in a CSD window lands offset by the shadow width.
+pub(crate) fn window_rect(root: &WlSurface, root_w: i32, root_h: i32) -> Rect {
+    surface::xdg_window_geometry(root)
+        .and_then(|g| g.clip(root_w, root_h))
+        .unwrap_or(Rect::new(0, 0, root_w, root_h))
 }
 
 /// Move keyboard focus to `id` (or clear it), applying the exact
@@ -498,20 +484,48 @@ fn focus_after_map(
 /// cursor when their toplevel is in the `activated` state. Every
 /// toplevel has to be un-activated first — a client left activated
 /// keeps behaving as if it has focus.
+///
+/// And the `Activated` flip is only *half* of focus. Without the seat
+/// half below, clients look focused and every key event still goes
+/// nowhere, which is a uniquely unhelpful failure: the window has a
+/// blinking cursor and ignores the keyboard.
 pub(crate) fn set_focus(state: &mut State, id: Option<ObjectId>) {
-    if state.windows.focused == id {
+    let State {
+        xdg_state,
+        windows,
+        seat,
+        update_tx,
+        ..
+    } = state;
+    apply_focus(xdg_state, windows, seat, update_tx, id);
+}
+
+/// [`set_focus`] against individually-borrowed fields.
+///
+/// It exists in this shape because the render tick focuses a
+/// newly-mapped window from inside a loop that has already destructured
+/// `State` — going back through `&mut State` there would collide with
+/// the borrows of the surface map and the update channel that the same
+/// loop is holding.
+fn apply_focus(
+    xdg_state: &XdgShellState,
+    windows: &mut WindowRegistry,
+    seat: &mut SeatState,
+    update_tx: &UnboundedSender<TaggedDisplayUpdate>,
+    id: Option<ObjectId>,
+) {
+    if windows.focused == id {
         return;
     }
-    state.windows.focused = id.clone();
+    windows.focused = id.clone();
 
-    let focused_surface: Option<WlSurface> = state
-        .xdg_state
+    let focused_surface: Option<WlSurface> = xdg_state
         .toplevel_surfaces()
         .iter()
         .find(|t| Some(t.wl_surface().id()) == id)
         .map(|t| t.wl_surface().clone());
 
-    for toplevel in state.xdg_state.toplevel_surfaces() {
+    for toplevel in xdg_state.toplevel_surfaces() {
         let active = Some(toplevel.wl_surface().id()) == id;
         toplevel.with_pending_state(|s| {
             if active {
@@ -523,27 +537,22 @@ pub(crate) fn set_focus(state: &mut State, id: Option<ObjectId>) {
         toplevel.send_pending_configure();
     }
 
-    // STAGE: Input — the seat is the other half of focus. Once
-    // `seat.rs` exists this is:
-    //     match &focused_surface {
-    //         Some(s) => state.seat.keyboard_focus(s.clone()),
-    //         None => state.seat.keyboard_unfocus(),
-    //     }
-    // Without it the `Activated` flip alone makes clients *look*
-    // focused while every key event still goes nowhere.
-    let _ = &focused_surface;
+    match &focused_surface {
+        Some(s) => seat.keyboard_focus(s),
+        None => seat.keyboard_unfocus(),
+    }
 
-    match id.as_ref().and_then(|i| state.windows.entries.get(i)) {
+    match id.as_ref().and_then(|i| windows.entries.get(i)) {
         Some(entry) => {
             send(
-                &state.update_tx,
+                update_tx,
                 &entry.client_id,
                 DisplayUpdate::WindowRaised {
                     window_id: entry.uuid.clone(),
                 },
             );
             send(
-                &state.update_tx,
+                update_tx,
                 &entry.client_id,
                 DisplayUpdate::WindowFocused {
                     window_id: Some(entry.uuid.clone()),
@@ -554,11 +563,62 @@ pub(crate) fn set_focus(state: &mut State, id: Option<ObjectId>) {
         // tagged with the empty client id; the backend broadcasts
         // `WindowFocused` regardless of tag.
         None => send(
-            &state.update_tx,
+            update_tx,
             "",
             DisplayUpdate::WindowFocused { window_id: None },
         ),
     }
+}
+
+/// Hide a window because the frontend asked to minimize it.
+///
+/// `entry.mapped` is deliberately **not** cleared. It tracks whether
+/// the *client* has a buffer up, and the client knows nothing about
+/// this: Wayland has no minimize protocol in the compositor→client
+/// direction beyond `xdg_toplevel.set_minimized` going the other way.
+/// Clearing it would make the very next render tick see an unmapped
+/// window with live pixels and immediately re-emit `WindowMapped`,
+/// producing a window that flickers back a frame after it is minimized.
+/// So this is purely a frontend-visible hide, undone by
+/// [`emit_restored`].
+pub(crate) fn emit_minimized(state: &mut State, id: &ObjectId) {
+    let Some(entry) = state.windows.entries.get(id) else {
+        return;
+    };
+    if !entry.mapped {
+        return;
+    }
+    send(
+        &state.update_tx,
+        &entry.client_id,
+        DisplayUpdate::WindowUnmapped {
+            window_id: entry.uuid.clone(),
+        },
+    );
+}
+
+/// Undo [`emit_minimized`]. Full damage is forced because the frontend
+/// throws away the canvas backing an unmapped window, so a partial
+/// update would restore a window that is blank except for whatever the
+/// client happens to repaint next.
+pub(crate) fn emit_restored(state: &mut State, id: &ObjectId) {
+    let Some(entry) = state.windows.entries.get_mut(id) else {
+        return;
+    };
+    if !entry.mapped {
+        return;
+    }
+    entry.damage.mark_full();
+    let (is_top_level, override_redirect) = entry.kind.flags();
+    send(
+        &state.update_tx,
+        &entry.client_id,
+        DisplayUpdate::WindowMapped {
+            window_id: entry.uuid.clone(),
+            is_top_level,
+            override_redirect,
+        },
+    );
 }
 
 /// Drain `wl_surface.frame` callbacks over a whole surface tree.

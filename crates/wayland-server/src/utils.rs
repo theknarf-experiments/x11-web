@@ -15,7 +15,6 @@ use smithay::utils::SERIAL_COUNTER;
 /// Next protocol serial. Wayland serials are a single monotonic
 /// sequence shared by every interface, which is why this is a process
 /// global in smithay rather than per-object state.
-#[allow(dead_code)] // STAGE: Input — first caller is the seat.
 pub(crate) fn new_serial() -> u32 {
     SERIAL_COUNTER.next_serial().into()
 }
