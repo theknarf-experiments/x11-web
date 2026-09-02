@@ -61,7 +61,8 @@ Files written from scratch (not derived)
 ----------------------------------------
 
     src/lib.rs, src/server.rs, src/router.rs, src/windows.rs,
-    src/input.rs, src/pixels.rs, src/translate.rs, src/decoration.rs
+    src/input.rs, src/pixels.rs, src/translate.rs, src/decoration.rs,
+    examples/headless.rs
 
 Note
 ----

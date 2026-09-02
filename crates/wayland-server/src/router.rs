@@ -37,9 +37,6 @@ use x11_web_protocol::InputEvent;
 /// channel rather than reaching into compositor state, which is
 /// `!Send` and lives on its own thread.
 ///
-/// The fields read as dead until the compositor's calloop receiver
-/// exists to consume them (STAGE: Compositor).
-#[allow(dead_code)]
 pub(crate) enum Command {
     Input {
         window_id: String,
@@ -122,9 +119,6 @@ impl WindowRouter {
 
     /// Called once from the compositor thread, after the calloop
     /// source for the receiving half has been inserted.
-    // STAGE: Compositor — `install` / `track` / `untrack` have no
-    // caller until the compositor thread exists.
-    #[allow(dead_code)]
     pub(crate) fn install(&self, tx: calloop::channel::Sender<Command>) {
         if let Ok(mut guard) = self.tx.lock() {
             *guard = Some(tx);
@@ -133,14 +127,12 @@ impl WindowRouter {
 
     /// Called from the compositor thread when a window becomes
     /// addressable (its first buffer commit) and when it goes away.
-    #[allow(dead_code)]
     pub(crate) fn track(&self, window_uuid: &str) {
         if let Ok(mut live) = self.live.lock() {
             live.insert(window_uuid.to_string());
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn untrack(&self, window_uuid: &str) {
         if let Ok(mut live) = self.live.lock() {
             live.remove(window_uuid);

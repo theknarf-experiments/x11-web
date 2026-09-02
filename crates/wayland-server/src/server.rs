@@ -19,12 +19,23 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
+use smithay::reexports::calloop::generic::Generic;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+use smithay::reexports::calloop::{channel, EventLoop, Interest, Mode, PostAction};
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
+use smithay::reexports::wayland_server::{Display, Resource};
+use smithay::utils::Size;
+use smithay::wayland::compositor::CompositorClientState;
+use smithay::wayland::socket::ListeningSocketSource;
 use tokio::sync::{mpsc, oneshot};
-use tracing::info;
+use tracing::{error, info, trace, warn};
 
-use crate::router::WindowRouter;
+use crate::router::{Command, WindowRouter};
+use crate::state::{State, WaylandClientData};
+use crate::windows;
 use crate::TaggedDisplayUpdate;
 
 pub struct WaylandServer {
@@ -147,24 +158,16 @@ impl WaylandServer {
 /// state, bind the socket, report the bound name back through
 /// `ready_tx`, then run the calloop event loop until it stops.
 ///
-/// STAGE: Compositor — everything below the signature. It must:
-///   1. create `Display<State>` + `EventLoop`;
-///   2. insert `ListeningSocketSource::new_auto()` (on accept: read
-///      the peer's pid off the stream credentials, mint a client-id
-///      UUID, `insert_client`, then push `(client_id, pid)` into
-///      `client_connected_tx` — this is the `ProcessConnected`
-///      plumbing);
-///   3. insert `Generic(display, READ, Level)` → `dispatch_clients`;
-///   4. insert the `calloop::channel` receiver whose sender it hands
-///      to `window_router.install(...)`;
-///   5. insert a `Timer` re-armed every `frame_interval` — the render
-///      tick that emits `PutImage` into `update_tx` and *then* drains
-///      `frame_callbacks`;
-///   6. call `seat.activate_keyboard()` once (it defaults to false
-///      and silently swallows every key otherwise);
-///   7. send `Ok(socket_name)` (or `Err`) on `ready_tx` and run
-///      `event_loop.run(Some(frame_interval), &mut state, |st| st.dh.flush_clients())`.
-#[allow(clippy::too_many_arguments, unused_variables)]
+/// Four calloop sources, and that is the whole compositor:
+///
+///   1. the listening socket — accept, identify, `insert_client`;
+///   2. the display fd — dispatch client requests;
+///   3. the embedder's command channel — input, resize, screen size;
+///   4. a `Timer` — the render tick.
+///
+/// Everything `!Send` (the `Display`, the `EventLoop`, the whole
+/// `State`) is constructed here and never leaves.
+#[allow(clippy::too_many_arguments)]
 fn compositor_thread(
     ready_tx: std::sync::mpsc::SyncSender<io::Result<String>>,
     xdg_runtime_dir: PathBuf,
@@ -174,7 +177,233 @@ fn compositor_thread(
     screen_size: (u16, u16),
     frame_interval: Duration,
 ) {
-    unimplemented!("STAGE: Compositor — smithay state, calloop sources, event loop");
+    // Anything that fails before the socket is bound has to travel
+    // back out through `ready_tx`, or `new()` blocks forever.
+    macro_rules! bail {
+        ($ctx:expr, $err:expr) => {{
+            let _ = ready_tx.send(Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("{}: {}", $ctx, $err),
+            )));
+            return;
+        }};
+    }
+
+    // `ListeningSocket::bind_auto` resolves the name against
+    // $XDG_RUNTIME_DIR, so this thread's view of the variable has to
+    // match the directory `new()` created and the one children are
+    // told about. Setting it here rather than relying on the ambient
+    // environment is what makes the library correct when embedded by
+    // a process that never set it.
+    //
+    // SAFETY: `set_var` is only unsound when another thread reads the
+    // environment concurrently. This runs before any client exists
+    // and before the sidecar spawns anything.
+    std::env::set_var("XDG_RUNTIME_DIR", &xdg_runtime_dir);
+
+    let mut event_loop: EventLoop<State> = match EventLoop::try_new() {
+        Ok(l) => l,
+        Err(e) => bail!("calloop event loop", e),
+    };
+    let display: Display<State> = match Display::new() {
+        Ok(d) => d,
+        Err(e) => bail!("wayland display", e),
+    };
+    let dh = display.handle();
+
+    let socket = match ListeningSocketSource::new_auto() {
+        Ok(s) => s,
+        Err(e) => bail!("binding wayland socket", e),
+    };
+    let socket_name = socket.socket_name().to_string_lossy().into_owned();
+
+    let mut state = State::new(
+        dh.clone(),
+        update_tx,
+        client_connected_tx,
+        window_router.clone(),
+        screen_size,
+    );
+
+    let handle = event_loop.handle();
+
+    // --- 1. accept ------------------------------------------------
+    //
+    // Peer credentials are read off the accepted stream *before* the
+    // client is inserted: this is the only point where the connecting
+    // process is unambiguously identified. It is the Wayland
+    // equivalent of the X11 sidecar reading the socket's peer pid,
+    // and it is what feeds the backend's process list.
+    if let Err(e) = handle.insert_source(socket, move |stream, _, state: &mut State| {
+        let pid = peer_pid(&stream);
+        let client_id = uuid::Uuid::new_v4().to_string();
+
+        let data = Arc::new(WaylandClientData {
+            client_id: client_id.clone(),
+            pid,
+            compositor_state: CompositorClientState::default(),
+        });
+
+        match state.dh.insert_client(stream, data) {
+            Ok(_) => {
+                info!(%client_id, pid, "wayland client connected");
+                let _ = state.client_connected_tx.send((client_id, pid));
+            }
+            Err(e) => warn!("failed to insert wayland client: {e}"),
+        }
+    }) {
+        bail!("inserting socket source", e);
+    }
+
+    // --- 2. client requests ---------------------------------------
+    let display_source = Generic::new(display, Interest::READ, Mode::Level);
+    if let Err(e) = handle.insert_source(display_source, |_, display, state: &mut State| {
+        // SAFETY: the `Display` is owned by this source for the
+        // lifetime of the event loop and is never moved out of it,
+        // which is exactly the invariant `dispatch_clients` requires.
+        unsafe {
+            if let Err(e) = display.get_mut().dispatch_clients(state) {
+                warn!("dispatch_clients failed: {e}");
+            }
+        }
+        Ok(PostAction::Continue)
+    }) {
+        bail!("inserting display source", e);
+    }
+
+    // --- 3. embedder commands -------------------------------------
+    let (cmd_tx, cmd_rx) = channel::channel::<Command>();
+    if let Err(e) = handle.insert_source(cmd_rx, |event, _, state: &mut State| {
+        if let channel::Event::Msg(cmd) = event {
+            apply_command(state, cmd);
+        }
+    }) {
+        bail!("inserting command channel", e);
+    }
+    // Only now can `WindowRouter::send_*` succeed. Everything the
+    // embedder sent before this returns `false`, which is the same
+    // answer the X11 router gives for a window it has no route for.
+    window_router.install(cmd_tx);
+
+    // --- 4. render tick -------------------------------------------
+    //
+    // A fixed-period timer rather than "render when a client
+    // commits": the tick is also what releases frame callbacks, so it
+    // has to fire on a schedule the clients cannot influence.
+    if let Err(e) = handle.insert_source(
+        Timer::from_duration(frame_interval),
+        move |_, _, state: &mut State| {
+            windows::tick(state);
+            TimeoutAction::ToDuration(frame_interval)
+        },
+    ) {
+        bail!("inserting render timer", e);
+    }
+
+    // STAGE: Input — `state.seat.activate_keyboard()` belongs here,
+    // once. `kb_active` defaults to false in the ported seat and
+    // every key event is silently swallowed until it is set.
+
+    if ready_tx.send(Ok(socket_name.clone())).is_err() {
+        // `new()` gave up on us (it can only do that by panicking),
+        // so there is nobody to serve.
+        return;
+    }
+
+    info!(socket = %socket_name, "wayland compositor event loop running");
+
+    // The `Some(frame_interval)` timeout bounds how long the loop can
+    // sit in poll(), which matters because `flush_clients` only runs
+    // between dispatches — without it, a client waiting on a frame
+    // callback could stall behind an idle poll.
+    let result = event_loop.run(Some(frame_interval), &mut state, |state| {
+        state.dh.flush_clients().ok();
+    });
+
+    match result {
+        Ok(()) => info!("wayland compositor event loop exited"),
+        Err(e) => error!("wayland compositor event loop failed: {e}"),
+    }
+}
+
+/// Read the connecting process's pid off an accepted socket.
+///
+/// `UnixStream::peer_cred` is still unstable, and
+/// `Client::get_credentials` is only usable *after* `insert_client` —
+/// but the pid has to go into the client's data at construction time.
+/// So this is the raw `SO_PEERCRED` getsockopt, which is what both of
+/// those wrap anyway.
+///
+/// A pid of 0 means "unknown" and is what the backend sees for a
+/// client whose credentials could not be read (never observed in
+/// practice on Linux, but a failed getsockopt must not take the
+/// compositor down over a bookkeeping field).
+fn peer_pid(stream: &std::os::unix::net::UnixStream) -> u32 {
+    use std::os::fd::AsRawFd;
+
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: `cred` is a live, correctly-sized `ucred` and `len`
+    // describes it; `fd` is owned by `stream` for the duration of the
+    // call. getsockopt writes at most `len` bytes into `cred`.
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut libc::ucred as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if rc != 0 || cred.pid <= 0 {
+        warn!("could not read peer credentials for wayland client");
+        return 0;
+    }
+    cred.pid as u32
+}
+
+/// Apply one embedder command inside the compositor thread.
+fn apply_command(state: &mut State, cmd: Command) {
+    match cmd {
+        Command::Resize {
+            window_id,
+            width,
+            height,
+        } => {
+            let Some(id) = state.windows.id_for_uuid(&window_id) else {
+                return;
+            };
+            let Some(toplevel) = state
+                .xdg_state
+                .toplevel_surfaces()
+                .iter()
+                .find(|t| t.wl_surface().id() == id)
+                .cloned()
+            else {
+                return;
+            };
+            // A configure is a *request*: the client acks it and then
+            // commits a buffer at whatever size it settled on. The
+            // window's reported size only changes when that buffer
+            // arrives, which is why nothing is emitted here.
+            toplevel.with_pending_state(|s| {
+                s.size = Some(Size::from((width as i32, height as i32)));
+                s.states.unset(xdg_toplevel::State::Maximized);
+                s.states.unset(xdg_toplevel::State::Fullscreen);
+            });
+            toplevel.send_pending_configure();
+        }
+        Command::ScreenSize { width, height } => {
+            state.output.resize(width as i32, height as i32);
+        }
+        Command::Input { window_id, event } => {
+            // STAGE: Input — `input::apply(state, &window_id, event)`.
+            // The route is live (the window is tracked, the command
+            // arrives here); only the seat that would consume it is
+            // missing.
+            trace!(%window_id, ?event, "input event dropped: no seat yet (STAGE: Input)");
+        }
+    }
 }
 
 /// Resolve and create `XDG_RUNTIME_DIR`.

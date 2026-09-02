@@ -57,9 +57,21 @@ pub mod pixels;
 pub mod translate;
 
 #[cfg(target_os = "linux")]
+mod decoration;
+#[cfg(target_os = "linux")]
+mod output;
+#[cfg(target_os = "linux")]
 mod router;
 #[cfg(target_os = "linux")]
 mod server;
+#[cfg(target_os = "linux")]
+mod state;
+#[cfg(target_os = "linux")]
+mod surface;
+#[cfg(target_os = "linux")]
+mod utils;
+#[cfg(target_os = "linux")]
+mod windows;
 
 #[cfg(target_os = "linux")]
 pub use router::WindowRouter;
