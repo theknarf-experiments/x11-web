@@ -34,8 +34,12 @@ COPY crates/wire/ crates/wire/
 COPY crates/pixel-codec/ crates/pixel-codec/
 COPY crates/telemetry/ crates/telemetry/
 # Stub workspace members the sidecar doesn't depend on so `cargo build`
-# can resolve the workspace manifest without them.
-RUN for crate in backend auth rtc-wire ws-wire sidecar-macos; do \
+# can resolve the workspace manifest without them. The stub name is
+# `x11-web-<dirname>`, which is why every crate directory here is named
+# to match its package. MANDATORY for new members: a workspace member
+# that is neither COPYed nor stubbed makes this image fail to resolve,
+# which fails every e2e test.
+RUN for crate in backend auth rtc-wire ws-wire sidecar-macos wayland-server sidecar-wayland; do \
       mkdir -p crates/$crate/src; \
       printf '[package]\nname = "x11-web-%s"\nversion = "0.1.0"\nedition = "2021"\n' "$crate" \
         > crates/$crate/Cargo.toml; \

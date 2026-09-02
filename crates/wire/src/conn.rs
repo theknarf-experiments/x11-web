@@ -104,8 +104,8 @@ impl WireWriter {
 }
 
 /// Sidecar implementation kind, set at handshake. Drives backend
-/// policy: X11 windows auto-stream and auto-attach to all open
-/// workspaces; macOS windows are visible only as thumbnails until
+/// policy: X11 and Wayland windows auto-stream and auto-attach to all
+/// open workspaces; macOS windows are visible only as thumbnails until
 /// the user drags one onto the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidecarKind {
@@ -114,6 +114,11 @@ pub enum SidecarKind {
     Unknown,
     X11,
     Macos,
+    /// Headless Wayland compositor (`x11-web-sidecar-wayland`).
+    /// Behaves like `X11` on every backend policy decision — it
+    /// exists as its own variant only so logs and metrics can tell
+    /// the two apart.
+    Wayland,
 }
 
 /// What the backend hands to its session handler after a successful
@@ -224,6 +229,10 @@ pub async fn accept(
     let sidecar_kind = match hello.get_sidecar_kind() {
         Ok(wire_capnp::SidecarKind::X11) => SidecarKind::X11,
         Ok(wire_capnp::SidecarKind::Macos) => SidecarKind::Macos,
+        Ok(wire_capnp::SidecarKind::Wayland) => SidecarKind::Wayland,
+        // `Err(_)` is a discriminant this backend's schema doesn't
+        // know — a newer sidecar. `Unknown` is the auto-stream path,
+        // which is the safe default for anything display-server-like.
         Ok(wire_capnp::SidecarKind::Unknown) | Err(_) => SidecarKind::Unknown,
     };
 
@@ -307,6 +316,7 @@ pub async fn dial(
         hello.set_sidecar_kind(match sidecar_kind {
             SidecarKind::X11 => wire_capnp::SidecarKind::X11,
             SidecarKind::Macos => wire_capnp::SidecarKind::Macos,
+            SidecarKind::Wayland => wire_capnp::SidecarKind::Wayland,
             SidecarKind::Unknown => wire_capnp::SidecarKind::Unknown,
         });
     }

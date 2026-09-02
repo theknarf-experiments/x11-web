@@ -1,0 +1,54 @@
+[package]
+name = "x11-web-wayland-server"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+# Only compile the compositor on Linux. smithay (and the wayland
+# protocol crates underneath it) don't build on macOS, but this repo
+# is developed on macOS — so everything smithay-touching sits behind
+# `cfg(target_os = "linux")` and the crate degrades to its two pure
+# modules (`pixels`, `translate`) elsewhere. That keeps
+# `cargo check --workspace` green on the host while leaving the pixel
+# and input-translation maths unit-testable without Docker.
+# Same shape as `crates/sidecar-macos`, which gates on macOS instead.
+[dependencies]
+# Event types emitted on the embedder's channel. Pixel `data` in
+# `DisplayUpdate::PutImage` is raw RGBA8888 — encoding lives in the
+# embedder (`x11-web-sidecar-wayland`), exactly as with `x11-server`.
+x11-web-protocol = { path = "../protocol" }
+# Only `mpsc::UnboundedSender` / `oneshot` are used: the compositor
+# itself runs on a calloop event loop on its own OS thread, and the
+# channels are the sole tokio touchpoint.
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Pinned to the exact rev waylandcraft is validated against
+# (89e58f77983ea10ce2c7ad0f5bf07ac826beab67 => smithay 0.7.0). No
+# crates.io release matches this API surface.
+#
+# `backend_drm` is deliberately dropped from upstream's feature set:
+# it only turns on the `drm`/`drm-ffi` optional deps, which are needed
+# solely by the EGL/dmabuf import path we are not porting (this
+# sidecar is headless and shm-only). `wayland_frontend` alone covers
+# wl_compositor, wl_subcompositor, wl_shm, xdg_shell, xdg_decoration,
+# viewporter, single_pixel_buffer and SealedFile.
+smithay = { git = "https://github.com/Smithay/smithay.git", rev = "89e58f7", default-features = false, features = [
+    "wayland_frontend",
+] }
+# Keymap compilation + modifier serialisation for the seat. Upstream
+# pins 0.8, but 0.9 is already in this workspace's lock via
+# `x11-web-x11-server` — taking 0.9 keeps a single libxkbcommon
+# binding version in one process.
+xkbcommon = "0.9"
+# geteuid() for the /run/user/<uid> XDG_RUNTIME_DIR default, and the
+# shm pool bounds arithmetic.
+libc = "0.2"
+
+# NOTE: calloop is NOT a direct dependency. It is used exclusively as
+# `smithay::reexports::calloop`, so its version can never drift from
+# the one smithay itself was compiled against.

@@ -1,4 +1,8 @@
 /target
+# Mount point for the Linux cargo target dir used by
+# tools/wayland-build.sh. The named volume is mounted here inside the
+# container, which leaves an empty directory behind on the host.
+/target-linux/
 node_modules
 .turbo
 .DS_Store
@@ -13,3 +17,4 @@ test-results
 # mprocs runtime log
 mprocs.log
 /tools/x11rb-fork/
+/tools/waylandcraft-upstream/

@@ -6,11 +6,13 @@ members = [
     "crates/backend",
     "crates/sidecar",
     "crates/sidecar-macos",
+    "crates/sidecar-wayland",
     "crates/wire",
     "crates/rtc-wire",
     "crates/ws-wire",
     "crates/pixel-codec",
     "crates/x11-server",
+    "crates/wayland-server",
     "crates/x11rb-protocol-msb",
 ]
 resolver = "2"

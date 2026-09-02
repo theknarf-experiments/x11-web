@@ -1,0 +1,71 @@
+x11-web-wayland-server — provenance and licensing
+=================================================
+
+This crate is a derivative work of **waylandcraft**.
+
+    Upstream project : waylandcraft
+    Upstream URL     : https://github.com/EVV1E/waylandcraft
+    Upstream commit  : 233d1431e6acbad1d0c47dfba44d971ce0cebfe8
+    Upstream license : GNU General Public License, version 3 (GPLv3)
+
+waylandcraft is a smithay-based Wayland compositor that renders client
+surfaces into Minecraft. The Minecraft/JNI half is not used here; what
+was taken is the compositor half — the smithay state wiring, xdg-shell
+handling, wl_shm buffer attach, and the hand-rolled wl_seat with its
+xkbcommon keymap.
+
+Because waylandcraft is GPLv3, every file in this crate that is derived
+from it carries a header comment naming the upstream file, the commit
+above, and the license, and all such derived code is confined to this
+crate. No waylandcraft-derived code exists anywhere else in the
+x11-web repository.
+
+Files derived from upstream
+---------------------------
+
+    src/utils.rs      <- native/src/utils.rs
+                         Serial/timestamp helpers, ported verbatim.
+
+    src/output.rs     <- native/src/output.rs
+                         Hand-rolled wl_output v4 global. The unused
+                         `bounds` concept was dropped; resize() is
+                         driven by WindowRouter::set_screen_size
+                         instead of the Android surface size.
+
+    src/state.rs      <- native/src/lib.rs
+                         Compositor state struct + smithay delegate
+                         wiring. The EGL/dmabuf, xwayland-satellite,
+                         .desktop-launcher and wl_data_device fields
+                         and their handlers were deleted; commit()
+                         gained the shm readback; the JNI request
+                         queues were replaced by direct handling.
+
+    src/surface.rs    <- native/src/bridge.rs
+                         Buffer attach (shm + single-pixel), surface
+                         tree walk, viewport/damage handling, frame
+                         callback drain. Every JNI-ism (handle tables,
+                         jptr marshalling, bind_java_type!) removed;
+                         the dmabuf attach arm deleted and the
+                         resulting reachable `unreachable!()` turned
+                         into a logged error.
+
+    src/seat.rs       <- native/src/seat.rs
+                         wl_seat / wl_pointer / wl_keyboard globals
+                         and the xkb keymap SealedFile. The trailing
+                         relative-pointer, pointer-constraints and
+                         cursor-shape sections were dropped (out of
+                         scope, and they carry the only let-chains,
+                         which would force edition 2024).
+
+Files written from scratch (not derived)
+----------------------------------------
+
+    src/lib.rs, src/server.rs, src/router.rs, src/windows.rs,
+    src/input.rs, src/pixels.rs, src/translate.rs, src/decoration.rs
+
+Note
+----
+
+The x11-web repository ships no top-level LICENSE file; adding one is
+the repository owner's call. This NOTICE records the provenance so the
+obligation is visible and actionable.

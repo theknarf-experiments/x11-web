@@ -1,0 +1,37 @@
+[package]
+name = "x11-web-sidecar-wayland"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "x11-web-sidecar-wayland"
+path = "src/main.rs"
+
+# Portable deps, copied 1:1 from `crates/sidecar` so the two binaries
+# read identically. Only the compositor itself is Linux-gated (below),
+# which is what keeps `cargo check --workspace` green on macOS — same
+# arrangement as `crates/sidecar-macos`, inverted.
+[dependencies]
+x11-web-protocol = { path = "../protocol" }
+x11-web-wire = { path = "../wire" }
+# Pixel encoder shared with the X11 and macOS sidecars. Raw RGBA out
+# of the compositor is WebP-lossless compressed before the wire.
+x11-web-pixel-codec = { path = "../pixel-codec" }
+capnp = "0.20"
+# Installs the default crypto provider `quinn` (via the wire crate)
+# uses for TLS. Without it, building a TLS config panics at startup.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+tracing = "0.1"
+# OTel: SDK init lives in `crates/telemetry`; this binary keeps its
+# own metric instruments in `src/telemetry.rs`. Env-gated — when
+# `OTEL_EXPORTER_OTLP_ENDPOINT` is unset the SDK is never initialised.
+x11-web-telemetry = { path = "../telemetry" }
+opentelemetry = { version = "0.31", features = ["metrics"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# smithay lives behind this path dep's own Linux gate, so a macOS
+# build of this workspace never even resolves a compositor.
+x11-web-wayland-server = { path = "../wayland-server" }

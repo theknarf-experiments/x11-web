@@ -1140,7 +1140,18 @@ async fn on_window_lifecycle_after(
             // Pop-ups (override_redirect) keep X-server-authoritative
             // placement and don't get a doc node — they live entirely
             // in `WindowList` and disappear with their parent.
-            if !*override_redirect && matches!(kind, SidecarKind::X11 | SidecarKind::Unknown) {
+            //
+            // The kind check picks out the auto-streaming sidecars:
+            // X11, Wayland, and `Unknown` (an old sidecar predating
+            // the handshake field, which was always X11). macOS is
+            // excluded because its windows only reach the canvas when
+            // the user drags a polaroid onto it.
+            if !*override_redirect
+                && matches!(
+                    kind,
+                    SidecarKind::X11 | SidecarKind::Unknown | SidecarKind::Wayland
+                )
+            {
                 // Resolve client_id → pid via the per-sidecar
                 // processes table that ProcessConnected builds, then
                 // pid → workspace via spawn_origin. The pair lets us
@@ -1283,7 +1294,13 @@ async fn attach_windows_for_new_client(
         .get(sidecar_id)
         .map(|s| s.kind)
         .unwrap_or(SidecarKind::Unknown);
-    if !matches!(kind, SidecarKind::X11 | SidecarKind::Unknown) {
+    // Auto-attach is an auto-streaming-sidecar concept only: X11,
+    // Wayland, and `Unknown` (an old X11 sidecar predating the
+    // handshake field). macOS windows are attached by the user.
+    if !matches!(
+        kind,
+        SidecarKind::X11 | SidecarKind::Unknown | SidecarKind::Wayland
+    ) {
         return;
     }
     let workspace_id = state

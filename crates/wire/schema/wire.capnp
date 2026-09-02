@@ -25,11 +25,11 @@ struct Hello {
     # nonce signatures or pre-shared keys (v1) without a schema bump.
     bearerToken @1 :Data;
     sidecarName @2 :Text;
-    # Distinguishes X11 (auto-stream every window) from macOS
-    # (stream on demand when the user drags a polaroid out of the
-    # picker into the canvas). Old sidecars that don't set this
-    # default to `unknown` — backend treats them as X11 for
-    # backwards compatibility.
+    # Distinguishes auto-streaming sidecars (X11, Wayland — every
+    # window is pushed as it maps) from macOS (stream on demand when
+    # the user drags a polaroid out of the picker into the canvas).
+    # Old sidecars that don't set this default to `unknown` — backend
+    # treats them as X11 for backwards compatibility.
     sidecarKind @3 :SidecarKind;
 }
 
@@ -37,6 +37,13 @@ enum SidecarKind {
     unknown @0;
     x11 @1;
     macos @2;
+    # A backend older than this schema decodes `wayland` as
+    # `Err(NotInSchema)`, which `conn.rs` folds into `Unknown` — and
+    # `Unknown` is the auto-stream path, which is exactly the
+    # behaviour a Wayland sidecar wants. The forward-compat
+    # degradation is therefore correct by accident, but it is worth
+    # not breaking: keep `unknown` as the fallback arm.
+    wayland @3;
 }
 
 struct HelloAck {
