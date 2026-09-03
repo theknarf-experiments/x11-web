@@ -213,9 +213,8 @@ fn read_back(buf: &WlBuffer, data: &SurfaceData) -> Result<Option<Image>, String
         Ok(None) => {}
         Err(e) => return Err(e),
     }
-    match try_attach_single_pixel(buf, data) {
-        Some(img) => return Ok(Some(img)),
-        None => {}
+    if let Some(img) = try_attach_single_pixel(buf, data) {
+        return Ok(Some(img));
     }
     warn!(
         "client attached a buffer this compositor cannot read (dmabuf/GPU?); \

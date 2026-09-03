@@ -1,0 +1,40 @@
+# Workspace-wide cargo configuration.
+#
+# Why this file exists: linking libxkbcommon on macOS.
+#
+# `crates/x11-server` (and now `crates/wayland-server`) depend on the
+# `xkbcommon` crate. That crate has NO build script — it declares
+# `#[link(name = "xkbcommon")]` and leaves finding the library to the
+# platform linker. On Linux that is fine: the loader's default search
+# path covers /usr/lib, so `-lxkbcommon` resolves. On macOS it is not:
+# Homebrew installs libxkbcommon as a keg-only formula outside every
+# default search path, so `cargo check` passes (no link step) while
+# `cargo test --workspace` dies at link time with
+#
+#     ld: library 'xkbcommon' not found
+#
+# for the x11-server and sidecar test binaries. Adding the keg's lib
+# directory to the search path is the smallest fix that makes the host
+# test suite runnable.
+#
+# Note the path: it is the per-formula keg (…/opt/libxkbcommon/lib),
+# NOT the shared Homebrew prefix (/opt/homebrew/lib). The keg contains
+# only libxkbcommon/libxkbregistry, whereas the shared prefix contains
+# hundreds of dylibs — putting *that* on the link search path would let
+# a Homebrew build of some unrelated system library (libz, libiconv, …)
+# shadow the SDK one for every other -sys crate in the graph. Both the
+# arm64 (/opt/homebrew) and Intel (/usr/local) prefixes are listed; a
+# `-L` pointing at a directory that does not exist is silently ignored,
+# so listing both costs nothing on either machine.
+#
+# This is a `cfg()` target table, so the flags apply only when the
+# compilation target is macOS and are not inherited by build scripts or
+# proc macros. Linux builds (including everything that runs through
+# tools/wayland-build.sh) are completely unaffected.
+[target.'cfg(target_os = "macos")']
+rustflags = [
+    "-L",
+    "native=/opt/homebrew/opt/libxkbcommon/lib",
+    "-L",
+    "native=/usr/local/opt/libxkbcommon/lib",
+]

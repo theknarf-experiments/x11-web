@@ -145,7 +145,7 @@ async fn main() {
                     // actually ran — a raw-RGBA passthrough would look
                     // identical in every other field.
                     let webp = data.len() > 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP";
-                    if put_images <= 3 || put_images % 60 == 0 {
+                    if put_images <= 3 || put_images.is_multiple_of(60) {
                         println!(
                             "PutImage #{put_images} client={client_id} window={window_id} \
                              at={x},{y} size={width}x{height} bytes={} webp={webp}",

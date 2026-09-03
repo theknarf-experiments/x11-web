@@ -101,10 +101,7 @@ impl WaylandServer {
         // as far as reporting — surface that as an io error rather
         // than hanging the caller.
         let display_name = ready_rx.recv().map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "wayland compositor thread exited before binding a socket",
-            )
+            io::Error::other("wayland compositor thread exited before binding a socket")
         })??;
 
         info!(
@@ -147,10 +144,7 @@ impl WaylandServer {
         let _ = self.exited_rx.await;
         match self.thread.join() {
             Ok(()) => Ok(()),
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "wayland compositor thread panicked",
-            )),
+            Err(_) => Err(io::Error::other("wayland compositor thread panicked")),
         }
     }
 }

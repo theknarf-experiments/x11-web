@@ -208,7 +208,7 @@ pub async fn accept(
         let mut nak = capnp::message::Builder::new_default();
         let mut ack = nak.init_root::<wire_capnp::hello_ack::Builder>();
         let mut rej = ack.reborrow().init_rejected();
-        rej.set_message(&format!(
+        rej.set_message(format!(
             "peer protocol version {peer_version}, server expects {PROTOCOL_VERSION}"
         ));
         let _ = writer.write_message(&nak).await;
@@ -391,7 +391,7 @@ async fn read_segment_framed(stream: &mut RecvStream) -> Result<Option<Vec<u8>>,
     // `4 * (seg_count - 1)` rounded up to 8-byte boundary.
     if seg_count > 1 {
         let extra_table_bytes = (seg_count - 1) * 4;
-        let padded = if extra_table_bytes % 8 == 0 {
+        let padded = if extra_table_bytes.is_multiple_of(8) {
             extra_table_bytes
         } else {
             extra_table_bytes + (8 - extra_table_bytes % 8)
@@ -426,12 +426,16 @@ async fn read_segment_framed(stream: &mut RecvStream) -> Result<Option<Vec<u8>>,
         // We read the rest of the table above. Re-derive what to put
         // back: write each remaining size as little-endian u32 plus
         // padding to 8-byte boundary.
-        for i in 1..seg_count {
-            all.extend_from_slice(&seg_sizes[i].to_le_bytes());
+        for size in seg_sizes.iter().skip(1) {
+            all.extend_from_slice(&size.to_le_bytes());
         }
         let so_far = 8 + (seg_count - 1) * 4;
-        let pad = if so_far % 8 == 0 { 0 } else { 8 - so_far % 8 };
-        all.extend(std::iter::repeat(0u8).take(pad));
+        let pad = if so_far.is_multiple_of(8) {
+            0
+        } else {
+            8 - so_far % 8
+        };
+        all.extend(std::iter::repeat_n(0u8, pad));
     }
     all.extend_from_slice(&body);
     Ok(Some(all))

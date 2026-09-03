@@ -132,8 +132,7 @@ pub fn parse_fingerprint(input: &str) -> Result<[u8; 32], WireError> {
         .trim()
         .trim_start_matches("sha256:")
         .trim_start_matches("SHA256:")
-        .replace(':', "")
-        .replace(' ', "");
+        .replace([':', ' '], "");
     let bytes = hex::decode(&trimmed)
         .map_err(|e| WireError::Tls(format!("fingerprint hex decode failed: {e}")))?;
     if bytes.len() != 32 {

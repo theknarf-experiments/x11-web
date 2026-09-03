@@ -213,6 +213,13 @@ impl DamageAccumulator {
 ///
 /// Offsets may be negative and the source may overhang any edge; the
 /// overhang is clipped, not wrapped.
+//
+// clippy::too_many_arguments: a blit is (dst, dst dims, src, src dims,
+// offset) and there is no smaller honest spelling. Bundling the dims
+// into a `Rect`-ish struct would only move the eight values one level
+// down while adding a constructor at every one of the call sites in
+// `windows.rs`, which is a loss.
+#[allow(clippy::too_many_arguments)]
 pub fn blit_copy(
     dst: &mut [u8],
     dst_w: i32,
@@ -242,6 +249,9 @@ pub fn blit_copy(
 /// premultiplied sources and is what every Wayland compositor does.
 /// (`Xrgb8888` arrives here with alpha already forced to 0xFF, so it
 /// degenerates to a copy — which is why the fast path exists.)
+//
+// clippy::too_many_arguments: see `blit_copy` above.
+#[allow(clippy::too_many_arguments)]
 pub fn blit_over(
     dst: &mut [u8],
     dst_w: i32,

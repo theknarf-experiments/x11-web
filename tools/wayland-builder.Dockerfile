@@ -43,4 +43,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libudev-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# clippy is not in the `rust:1-bookworm` base (it ships rustc + cargo +
+# rustfmt only), and the Linux-only crates are `cfg`'d out on the macOS
+# host — so a host `cargo clippy` lints literally none of the Wayland
+# code. Baking the component in is the only way to lint it at all.
+RUN rustup component add clippy
+
 WORKDIR /app

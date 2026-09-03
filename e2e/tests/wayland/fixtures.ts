@@ -190,6 +190,13 @@ export type WaylandFixtures = {
 
 export const test = base.extend<{}, WaylandFixtures>({
 	waylandSidecarContainer: [
+		// Playwright discovers a fixture's dependencies by string-parsing
+		// this parameter: `fixtureParameterNames` throws unless the first
+		// argument is literally an object destructuring pattern, so a
+		// fixture with no dependencies has to spell that as `{}`. (The
+		// suppression has to be a single comment line — biome only honours
+		// a `biome-ignore` on the line directly above the finding.)
+		// biome-ignore lint/correctness/noEmptyPattern: Playwright requires the destructuring pattern
 		async ({}, use) => {
 			await ensureSetup();
 			await use(waylandSidecarContainer);
@@ -199,6 +206,7 @@ export const test = base.extend<{}, WaylandFixtures>({
 		{ scope: "worker", timeout: 900_000 },
 	],
 	frontendUrl: [
+		// biome-ignore lint/correctness/noEmptyPattern: Playwright requires the destructuring pattern
 		async ({}, use) => {
 			await ensureSetup();
 			const wsUrl = `ws://localhost:${backendPort}/ws/frontend`;

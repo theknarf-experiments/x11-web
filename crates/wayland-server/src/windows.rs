@@ -255,7 +255,7 @@ pub(crate) fn tick(state: &mut State) {
             // Opaque black rather than transparent: a window whose
             // subsurfaces don't cover the whole geometry should read
             // as a window, not as a hole in the canvas.
-            entry.fb = vec![0, 0, 0, 255].repeat((w * h) as usize);
+            entry.fb = [0, 0, 0, 255].repeat((w * h) as usize);
             entry.damage.mark_full();
         }
 
