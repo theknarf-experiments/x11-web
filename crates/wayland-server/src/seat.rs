@@ -90,6 +90,21 @@ pub(crate) struct SeatState {
     /// exactly that. `GetKeyboard` consults this field and sends the
     /// missing `enter` itself.
     focus: Option<WlSurface>,
+    /// The surface the pointer is currently over, and where inside it,
+    /// in surface-local coordinates.
+    ///
+    /// The pointer twin of `focus`, and it exists for the same reason:
+    /// [`Self::pointer_focus`] only enters the `wl_pointer`s that existed
+    /// at the moment the pointer arrived, so one created afterwards sits
+    /// with `focus: None` and — since `pointer_motion` skips a pointer
+    /// with no focus — receives nothing. Unlike the keyboard case this
+    /// one self-heals: the next `pointer_motion_focus` re-runs
+    /// `pointer_focus` and enters the newcomer. But "self-heals on the
+    /// next mouse movement" still means a client that binds its pointer
+    /// after its window is already under the cursor sees no `enter`, and
+    /// therefore no hover state and no cursor of its own, until the user
+    /// happens to move the mouse.
+    ptr_focus: Option<(WlSurface, f64, f64)>,
     /// X11 keycodes currently down, so a client that takes focus
     /// mid-chord learns about it from `wl_keyboard.enter`.
     pressed_keys: HashSet<u32>,
@@ -218,6 +233,7 @@ impl SeatState {
             keyboards: Vec::new(),
             kb_active: false,
             focus: None,
+            ptr_focus: None,
             pressed_keys: HashSet::new(),
             keymap_file,
             xkb_state,
@@ -253,6 +269,12 @@ impl SeatState {
     /// enter and a leave in the wrong order.
     fn pointer_focus(&mut self, surface: Option<&WlSurface>, x: f64, y: f64) {
         let serial = new_serial();
+
+        // Mirror the seat-wide pointer position before touching any
+        // `wl_pointer`, so a `get_pointer` arriving later can be caught
+        // up. Recorded even when no pointer object currently qualifies —
+        // the whole point is to serve objects that do not exist yet.
+        self.ptr_focus = surface.map(|s| (s.clone(), x, y));
 
         self.for_all_pointers(|pointer, data| {
             let Some(focus) = &data.focus else {
@@ -666,7 +688,36 @@ impl Dispatch<WlSeat, ()> for State {
                     last_motion: None,
                 }));
                 let pointer: WlPointer = data_init.init(id, data);
-                state.seat.pointers.push(pointer);
+                state.seat.pointers.push(pointer.clone());
+
+                // Catch this pointer up to where the pointer already is,
+                // for the same reason `GetKeyboard` below catches up to
+                // focus: `pointer_focus` only entered the objects that
+                // existed when the pointer arrived. A client that binds
+                // wl_seat, maps a window under the cursor, and only then
+                // calls get_pointer would otherwise show no hover state
+                // and no cursor until the user moved the mouse.
+                let entered = state
+                    .seat
+                    .ptr_focus
+                    .clone()
+                    .filter(|(s, _, _)| s.is_alive() && s.client() == pointer.client());
+                if let Some((surface, x, y)) = entered {
+                    let serial = new_serial();
+                    pointer.enter(serial, &surface, x, y);
+                    state.seat.pointer_frame(&pointer);
+                    if let Some(cell) = pointer.data::<PointerRef>() {
+                        if let Ok(mut guard) = cell.lock() {
+                            guard.focus = Some(surface);
+                            guard.last_enter = Some(serial);
+                            // Deliberately left None: the enter above
+                            // already carried the position, and priming
+                            // this would make the next real motion to the
+                            // same subpixel be dropped as a duplicate.
+                            guard.last_motion = None;
+                        }
+                    }
+                }
             }
             wl_seat::Request::GetKeyboard { id } => {
                 let data = Arc::new(Mutex::new(KeyboardData { focus: None }));
