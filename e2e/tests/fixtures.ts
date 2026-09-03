@@ -279,6 +279,10 @@ async function doSetup() {
 	console.log(
 		`[worker ${WORKER_INDEX}] SPA served by backend at http://localhost:${backendPort}`,
 	);
+	// Snapshot the container's infrastructure processes before any test has
+	// spawned anything, so the per-test reset can tell "was always here" from
+	// "a test started this" without matching on names. See RESET_SCRIPT.
+	await captureBaselineProcesses(sidecarContainer);
 	setupDone = true;
 }
 
@@ -593,25 +597,44 @@ export async function runPythonScript(
 //      with a blanket 2s sleep — a guess, not a condition, and ~6.7 minutes of
 //      pure sleep across this suite.
 //
-// Instead: enumerate the sidecar's own child processes and kill everything
-// that is not one of the two infrastructure daemons it starts (`dbus-daemon`,
-// from crates/sidecar/src/main.rs, and `pulseaudio`, from
-// crates/sidecar/entrypoint.sh). Every X11 app the suite spawns is a direct
-// child of the sidecar, so this needs no app names and covers apps added
-// later. Zombies are skipped — the sidecar reaps its own children, and a
-// not-yet-reaped entry is already gone from the X server's point of view.
+// Instead, identify the survivors POSITIONALLY rather than by name. Right
+// after the sidecar container is ready — before any test has run — snapshot
+// the processes that exist (`captureBaselineProcesses`). Those are exactly the
+// container's infrastructure: the sidecar itself, the `pulseaudio` from
+// crates/sidecar/entrypoint.sh, and the `dbus-daemon` the sidecar starts for
+// AppMenu export. Everything that exists later and is not in that snapshot was
+// started by a test, so the reset kills it.
 //
-// Then wait on the actual condition (`xlsclients` reporting zero connected
-// clients) rather than on a fixed sleep.
+// This is name-free in both directions, which matters more than it sounds:
+//
+//   * It kills whole process TREES, not just the sidecar's direct children.
+//     Measured: `firefox-esr` forks nine grandchildren (Web Content, RDD
+//     Process, Socket Process, ...) that a direct-children-only kill orphans
+//     rather than reaps.
+//   * It does NOT protect every process merely called `dbus-daemon`. Measured:
+//     firefox starts its own `dbus-launch` + `dbus-daemon` pair as siblings of
+//     the sidecar's, so an exclusion keyed on the name would spare one stray
+//     session bus per firefox test, forever.
+//
+// Two guards on the kill list: processes with ppid 0 are `docker exec`
+// sessions (verified — that is how the container reports them), including the
+// shell running this very script, so they must survive; and a baseline pid is
+// only honoured if its `comm` still matches what was recorded, so pid reuse
+// over a long run cannot silently protect an app.
 const RESET_SCRIPT = `
 set -u
 export DISPLAY=:99
-sidecar=$(pgrep -x x11-web-sidecar | head -1)
-if [ -n "\${sidecar:-}" ]; then
-  victims=$(ps -eo pid=,ppid=,stat=,comm= | awk -v s="$sidecar" \
-    '$2==s && $3 !~ /^Z/ && $4!="dbus-daemon" && $4!="pulseaudio" {print $1}')
-  [ -n "$victims" ] && kill -9 $victims 2>/dev/null
-fi
+# BASELINE_PIDS is substituted per worker: "pid:comm pid:comm ..."
+baseline="__BASELINE__"
+victims=$(ps -eo pid=,ppid=,stat=,comm= | awk -v base="$baseline" '
+  BEGIN { n = split(base, a, " "); for (i = 1; i <= n; i++) { split(a[i], kv, ":"); keep[kv[1]] = kv[2] } }
+  $2 == 0 { next }                      # docker exec sessions, incl. this one
+  $1 == 1 { next }                      # container init (the sidecar)
+  $3 ~ /^Z/ { next }                    # already dead, awaiting reap
+  ($1 in keep) && keep[$1] == $4 { next }  # infrastructure from the snapshot
+  { print $1 }
+')
+[ -n "$victims" ] && kill -9 $victims 2>/dev/null
 # Wait for the X server to actually drop those client connections.
 for _ in $(seq 1 50); do
   n=$(xlsclients 2>/dev/null | wc -l)
@@ -628,16 +651,59 @@ rm -rf /root/.mozilla /root/.cache/mozilla 2>/dev/null
 true
 `;
 
+/** `pid:comm` pairs for the container's infrastructure processes, snapshotted
+ *  once per worker before any test runs. Empty until `doSetup` fills it. */
+let baselineProcesses = "";
+
+// Cache the snapshot in the container, not just in this process. Playwright
+// respawns a worker after a failure and `ensureSetup()` then re-attaches to the
+// SAME running container via `.withReuse()` — at which point tests have already
+// spawned apps, and a fresh `ps` would enrol those apps as "infrastructure" and
+// protect them for the rest of the run. Writing the snapshot on first sight and
+// reading it back afterwards keeps it pinned to the container's clean state.
+const BASELINE_FILE = "/tmp/x11web-baseline-processes";
+const CAPTURE_BASELINE = `
+if [ ! -s ${BASELINE_FILE} ]; then
+  ps -eo pid=,ppid=,comm= | awk '$2 == 1 { print $1 ":" $3 }' | tr '\\n' ' ' > ${BASELINE_FILE}
+fi
+cat ${BASELINE_FILE}
+`;
+
+async function captureBaselineProcesses(
+	container: StartedTestContainer,
+): Promise<void> {
+	try {
+		const r = await container.exec(["bash", "-c", CAPTURE_BASELINE]);
+		baselineProcesses = r.output.trim().replace(/\s+/g, " ");
+		console.log(
+			`[worker ${WORKER_INDEX}] baseline processes: ${baselineProcesses}`,
+		);
+	} catch {
+		// Leave it empty: the reset then spares only pid 1 and the exec
+		// sessions, which is over-aggressive but still safe (the sidecar
+		// restarts dbus-daemon lazily) and never silently under-cleans.
+		baselineProcesses = "";
+	}
+}
+
 /**
  * Reset the worker's X server to a clean slate: no client apps, pointer at the
  * origin, empty selections. Runs automatically before every test via the
  * `x11Clean` auto-fixture; exported for the few places that need an extra
  * mid-test reset.
+ *
+ * Bounded: a `docker exec` that hangs under load must not eat the test's whole
+ * budget, so give up after 20s and let the test proceed rather than block.
  */
 export async function cleanupApps(
 	container: StartedTestContainer,
 ): Promise<void> {
-	await container?.exec(["bash", "-c", RESET_SCRIPT]).catch(() => {});
+	if (!container) return;
+	const script = RESET_SCRIPT.replace("__BASELINE__", baselineProcesses);
+	await Promise.race([
+		container.exec(["bash", "-c", script]).catch(() => {}),
+		new Promise((r) => setTimeout(r, 20_000)),
+	]);
 }
 
 // Register cleanup on process termination signals.
