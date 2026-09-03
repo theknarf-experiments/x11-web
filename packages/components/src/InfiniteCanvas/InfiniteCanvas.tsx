@@ -246,6 +246,11 @@ export function InfiniteCanvas({
 	return (
 		<div
 			ref={viewportRef}
+			// `application`: this viewport owns pan / zoom / marquee and
+			// handles its own pointer and key semantics, so assistive
+			// tech should pass input through rather than impose browse
+			// mode. It is not a button or a link and must not claim to be.
+			role="application"
 			className={s.viewport}
 			data-testid="infinite-canvas"
 			onDragOver={handleDragOver}

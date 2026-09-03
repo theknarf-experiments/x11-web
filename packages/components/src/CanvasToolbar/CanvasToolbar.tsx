@@ -41,7 +41,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 				hotkey={TOOL_HOTKEYS.pointer}
 				onClick={() => onSelect("pointer")}
 			>
-				<svg viewBox="0 0 16 16" width={16} height={16}>
+				<svg aria-hidden="true" viewBox="0 0 16 16" width={16} height={16}>
 					<path
 						d="M3 2 L13 8 L8 9 L7 14 Z"
 						fill="currentColor"
@@ -57,7 +57,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 				hotkey={TOOL_HOTKEYS.box}
 				onClick={() => onSelect("box")}
 			>
-				<svg viewBox="0 0 16 16" width={16} height={16}>
+				<svg aria-hidden="true" viewBox="0 0 16 16" width={16} height={16}>
 					<rect
 						x={2}
 						y={3}
@@ -75,7 +75,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 				hotkey={TOOL_HOTKEYS.arrow}
 				onClick={() => onSelect("arrow")}
 			>
-				<svg viewBox="0 0 16 16" width={16} height={16}>
+				<svg aria-hidden="true" viewBox="0 0 16 16" width={16} height={16}>
 					<path
 						d="M2 13 L13 4"
 						fill="none"
@@ -92,7 +92,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 				hotkey={TOOL_HOTKEYS.text}
 				onClick={() => onSelect("text")}
 			>
-				<svg viewBox="0 0 16 16" width={16} height={16}>
+				<svg aria-hidden="true" viewBox="0 0 16 16" width={16} height={16}>
 					<path
 						d="M3 3 H13 M8 3 V13"
 						fill="none"
@@ -108,7 +108,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 				hotkey={TOOL_HOTKEYS.pen}
 				onClick={() => onSelect("pen")}
 			>
-				<svg viewBox="0 0 16 16" width={16} height={16}>
+				<svg aria-hidden="true" viewBox="0 0 16 16" width={16} height={16}>
 					<path
 						d="M2 14 C 4 11, 6 9, 9 7 C 11 5, 13 4, 14 3"
 						fill="none"
@@ -125,7 +125,7 @@ export function CanvasToolbar({ tool, onSelect }: CanvasToolbarProps) {
 				hotkey={TOOL_HOTKEYS.markdown}
 				onClick={() => onSelect("markdown")}
 			>
-				<svg viewBox="0 0 16 16" width={16} height={16}>
+				<svg aria-hidden="true" viewBox="0 0 16 16" width={16} height={16}>
 					<rect
 						x={2}
 						y={3}

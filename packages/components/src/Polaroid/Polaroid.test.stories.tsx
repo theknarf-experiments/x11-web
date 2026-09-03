@@ -42,7 +42,7 @@ export const RendersPlaceholderWithoutSrc: Story = {
 };
 
 /** `draggable` flag flips the HTML5 drag attribute and the
- *  `onDragStart` callback fires with the wrapping `<div>` as
+ *  `onDragStart` callback fires with the card `<button>` as
  *  the event target. */
 export const DragStartFires: Story = {
 	args: {

@@ -81,6 +81,11 @@ export function OcifMarkdown({
 
 	return (
 		<div
+			// `application`: the card swallows canvas-level shortcuts so
+			// the editor inside it can own the keyboard — which is exactly
+			// what this role tells assistive tech, and why the keydown
+			// handler below is not a stray listener on inert markup.
+			role="application"
 			data-testid="ocif-markdown"
 			data-node-id={id}
 			data-ocif-attachable={id}

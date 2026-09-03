@@ -6,6 +6,7 @@
  */
 import { fileURLToPath } from "node:url";
 import { register } from "tsx/esm/api";
+
 const unregister = register();
 try {
 	await import(fileURLToPath(new URL("../src/index.ts", import.meta.url)));

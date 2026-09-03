@@ -24,6 +24,16 @@ use x11_web_protocol::*;
 use x11_web_wire::tls::generate_self_signed;
 use x11_web_wire::{BackendToSidecar, SidecarKind, SidecarToBackend};
 
+/// `(sidecar_id, client_id, window_id)` — the triple that identifies
+/// one window globally. Named because it appears as a map key, an
+/// ordering element and a lookup argument all over this file.
+type WindowKey = (String, String, String);
+
+/// Latest encoded frame per `client_id` → `window_id`. Two nested
+/// maps rather than a `HashMap<(String, String), _>` so dropping a
+/// client's whole buffer set is one `remove`.
+type FramesByClient = Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
+
 #[derive(Clone)]
 struct AppState {
     sidecars: Arc<RwLock<HashMap<String, SidecarConnection>>>,
@@ -46,8 +56,8 @@ struct AppState {
     /// last entry on top. The filtered list (mapped + top-level or
     /// override-redirect) is published as `BackendToFrontend::WindowList`
     /// on every change.
-    window_track: Arc<RwLock<HashMap<(String, String, String), TrackedWindow>>>,
-    window_order: Arc<RwLock<Vec<(String, String, String)>>>,
+    window_track: Arc<RwLock<HashMap<WindowKey, TrackedWindow>>>,
+    window_order: Arc<RwLock<Vec<WindowKey>>>,
     /// Display update buffer per client_id for replay on frontend connect.
     /// PutImage is no longer in here — see `pixel_buffers`.
     display_buffers: Arc<RwLock<HashMap<String, Vec<BackendToFrontend>>>>,
@@ -55,14 +65,14 @@ struct AppState {
     /// window_id), replayed over the DataChannel once a frontend's
     /// DC opens. Replaces the old WS-shaped PutImage replay; pixels
     /// don't ride the WS anymore.
-    pixel_buffers: Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>,
+    pixel_buffers: FramesByClient,
     /// Latest Cap'n Proto-encoded WindowThumbnail frame per
     /// (client_id, window_id). Sidecars (currently macOS only) emit
     /// these at low rate so the frontend can render previews in the
     /// spawn-popover picker. Same DC fan-out + replay-on-open story
     /// as `pixel_buffers`; kept parallel rather than merged so
     /// thumbnails and live frames don't overwrite each other.
-    thumbnail_buffers: Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>,
+    thumbnail_buffers: FramesByClient,
     /// Reference count of how many workspaces have a given window
     /// attached (i.e. carry an `OcifNode` with the `@x11web/window`
     /// extension for it). Rebuilt by
@@ -547,7 +557,7 @@ async fn dispatch_sidecar_msg(state: &AppState, sidecar_id: &str, msg: SidecarTo
                 message,
             } => {
                 broadcast_to_frontends(
-                    &state,
+                    state,
                     BackendToFrontend::CommandResult {
                         request_id: request_id.unwrap_or_default(),
                         success: false,
@@ -1395,7 +1405,17 @@ async fn backend_attach_window(
                 100.0 + node_count as f64 * 30.0,
             )
         };
-        entry.attach_window_node(window_id, sidecar_id, x, y, max_z + 1.0, width, height)
+        entry.attach_window_node(
+            window_id,
+            sidecar_id,
+            workspace_doc::NodeGeometry {
+                x,
+                y,
+                z: max_z + 1.0,
+                width,
+                height,
+            },
+        )
     };
     info!(
         "backend_attach_window workspace={workspace_id} window={window_id} changed={changed}"

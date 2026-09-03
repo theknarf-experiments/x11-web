@@ -347,6 +347,11 @@ export function WindowFrame({
 	return (
 		<div
 			ref={containerRef}
+			// `application`: the frame wraps a live remote X11 window whose
+			// own toolkit owns the keyboard. Announcing it as a generic
+			// container would put a screen reader into browse mode and
+			// swallow the keystrokes we forward to the client.
+			role="application"
 			className={containerClass}
 			style={containerStyle}
 			onPointerDown={(e) => {
@@ -354,6 +359,15 @@ export function WindowFrame({
 				handleTitlePointerDown(e);
 			}}
 			onClick={() => canvasRef.current?.focus({ preventScroll: true })}
+			// The click handler only moves DOM focus onto the inner
+			// canvas; keyboard users reach that canvas directly via Tab,
+			// so pressing a key here does the same job as the click.
+			onKeyDown={(e) => {
+				if (e.target !== e.currentTarget) return;
+				if (e.key !== "Enter" && e.key !== " ") return;
+				e.preventDefault();
+				canvasRef.current?.focus({ preventScroll: true });
+			}}
 			data-testid="window-frame"
 			data-client-id={clientId}
 			data-wm-state={wmState}

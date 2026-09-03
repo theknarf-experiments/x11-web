@@ -3722,8 +3722,10 @@ test.describe
 				const failures: string[] = [];
 				const binaryPattern =
 					/--- XTS_BEGIN: (.+?) ---\n([\s\S]*?)--- XTS_END: \1 ---/g;
-				let bMatch: RegExpExecArray | null;
-				while ((bMatch = binaryPattern.exec(result.output)) !== null) {
+				// `matchAll` rather than the classic `while ((m = re.exec(s)))`:
+				// same semantics for a /g regex, without the assignment-in-
+				// condition that hides a typo'd `=` for `==`.
+				for (const bMatch of result.output.matchAll(binaryPattern)) {
 					const binaryName = bMatch[1];
 					const binaryOutput = bMatch[2];
 					const binaryResults = parseTetOutput(binaryOutput);

@@ -7,6 +7,11 @@ import { buildSegments, parseDecorations } from "./parse";
 interface Props {
 	value: string;
 	onChange: (text: string) => void;
+	/** Accessible name for the editing surface. `role="textbox"` has
+	 *  no implicit name the way a labelled `<textarea>` would, so one
+	 *  has to be supplied; defaults to a generic description. Set it
+	 *  when a page has more than one editor. */
+	label?: string;
 	/** Optional class merged onto the outer editable `<div>` so
 	 *  consumers can override the default background / border /
 	 *  size from outside. */
@@ -26,7 +31,12 @@ interface Props {
  *  back into EC for clicks, pushing EC.selection back into DOM so
  *  the native caret paints in the right spot, and inserting `\n`
  *  on Enter (which Chromium swallows from the textupdate path). */
-export function MarkdownArea({ value, onChange, className }: Props) {
+export function MarkdownArea({
+	value,
+	onChange,
+	className,
+	label = "Markdown editor",
+}: Props) {
 	const ref = useRef<HTMLDivElement>(null);
 	const ecRef = useRef<EditContext | null>(null);
 	const onChangeRef = useRef(onChange);
@@ -65,6 +75,11 @@ export function MarkdownArea({ value, onChange, className }: Props) {
 	// (e.g., two collaborating tabs side-by-side) the unfocused
 	// editor's effect would otherwise stomp the global DOM
 	// selection out of the editor the user is actually typing in.
+	// `value` is a *trigger*, not a read dependency: the body derives
+	// everything from the live EditContext and the DOM, but it has to
+	// run again whenever the text changed. Dropping it, as the rule
+	// suggests, would leave the caret painted at the pre-edit offset.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `value` is the re-run trigger, not a value read in the body.
 	useLayoutEffect(() => {
 		const el = ref.current;
 		const ec = ecRef.current;
@@ -87,6 +102,12 @@ export function MarkdownArea({ value, onChange, className }: Props) {
 		sel.addRange(r);
 	}, [value]);
 
+	// Mount-once by design. `value` is read to seed the EditContext's
+	// initial text; adding it to the deps would tear down and rebuild
+	// the EditContext on every keystroke, losing the composition state
+	// and the caret with it. Later edits reach the EC through
+	// `textupdate` and the [value] effects above.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `value` seeds the EditContext once; re-running would destroy it mid-edit.
 	useEffect(() => {
 		const el = ref.current;
 		if (!el || typeof EditContext === "undefined") return;
@@ -150,12 +171,20 @@ export function MarkdownArea({ value, onChange, className }: Props) {
 			el.editContext = null;
 			ecRef.current = null;
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	return (
+		// A real <textarea> is not an option: EditContext attaches only to
+		// non-form elements, and a textarea cannot contain the per-token
+		// <span>s that carry the syntax highlighting. So `role="textbox"`
+		// is the accurate description of what this div is, and
+		// useSemanticElements' suggested replacement does not exist here.
+		// biome-ignore lint/a11y/useSemanticElements: a textarea cannot host an EditContext.
 		<div
 			ref={ref}
+			role="textbox"
+			aria-multiline="true"
+			aria-label={label}
 			className={className ? `${s.area} ${className}` : s.area}
 			tabIndex={0}
 			onKeyDown={(e) => {
@@ -174,7 +203,13 @@ export function MarkdownArea({ value, onChange, className }: Props) {
 			{segments.map((seg, i) => (
 				<span
 					// Stable key — same `<span>` across renders so
-					// the DOM selection survives keystrokes.
+					// the DOM selection survives keystrokes. A
+					// content-derived key would remount the span the
+					// caret lives in on every keystroke and collapse
+					// the selection, which is exactly the behaviour
+					// noArrayIndexKey usually protects against but
+					// here is the whole point.
+					// biome-ignore lint/suspicious/noArrayIndexKey: index keys keep the caret's <span> identity stable across edits.
 					key={i}
 					className={
 						seg.classes

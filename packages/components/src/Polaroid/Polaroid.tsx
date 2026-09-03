@@ -13,8 +13,8 @@ interface PolaroidProps {
 	/** Pass `true` to make the card a HTML5 drag source. The
 	 *  caller wires `onDragStart` to attach payload + effect. */
 	draggable?: boolean;
-	onDragStart?: (e: React.DragEvent<HTMLDivElement>) => void;
-	onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
+	onDragStart?: (e: React.DragEvent<HTMLButtonElement>) => void;
+	onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
 /** A paper-textured "polaroid" card — image + handwritten caption
@@ -30,7 +30,14 @@ export function Polaroid({
 	onClick,
 }: PolaroidProps) {
 	return (
-		<div
+		// A real <button>, not a div with an onClick: the card is a
+		// picker item, so it has to be reachable by Tab and activatable
+		// by Enter/Space. Doing that by hand (role + tabIndex + a key
+		// handler) reimplements what the element already does, and gets
+		// the Space-scrolls-the-page case wrong. `.polaroid` resets the
+		// UA button chrome.
+		<button
+			type="button"
 			className={s.polaroid}
 			data-testid="polaroid"
 			title={title ?? caption}
@@ -39,12 +46,17 @@ export function Polaroid({
 			onClick={onClick}
 		>
 			{src ? (
-				<img src={src} alt={caption} className={s.image} draggable={false} />
+				// `alt=""`: the card's own accessible name is the caption (via
+				// the caption text and the `title`), so repeating it on the
+				// photo makes a screen reader announce it twice — axe's
+				// image-redundant-alt. The photo carries no information the
+				// caption does not.
+				<img src={src} alt="" className={s.image} draggable={false} />
 			) : (
 				<div className={s.placeholder} data-testid="polaroid-placeholder" />
 			)}
 			<div className={s.caption}>{caption}</div>
-		</div>
+		</button>
 	);
 }
 

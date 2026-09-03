@@ -298,7 +298,7 @@ pub(crate) fn handle_get_window_attributes(
             colormap: cmap,
             all_event_masks: EventMask::from(win.event_mask | remote_masks),
             your_event_mask: EventMask::from(win.event_mask),
-            do_not_propagate_mask: EventMask::from(win.do_not_propagate_mask as u32),
+            do_not_propagate_mask: EventMask::from(win.do_not_propagate_mask),
         },
         state.byte_order(),
     )

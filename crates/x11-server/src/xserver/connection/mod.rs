@@ -454,10 +454,9 @@ pub(crate) async fn handle_client(
         ],
         xtest: handlers::xtest::XTestState::default(),
         dpms: super::handlers::dpms::DpmsState::default(),
-        xkb: {
-            let mut x = super::client::XkbState::default();
-            x.compat_si = super::handlers::xkb::default_compat_si();
-            x
+        xkb: super::client::XkbState {
+            compat_si: super::handlers::xkb::default_compat_si(),
+            ..Default::default()
         },
         xvideo: handlers::xvideo::XVideoState::default(),
         shared_pixmaps,
@@ -1794,7 +1793,6 @@ pub(crate) async fn handle_client(
                                 let (deepest, local_x, local_y) =
                                     find_deepest_window(&state.windows, x11_wid, *x, *y);
                                 if deepest != state.last_entered_window {
-                                    let prev = state.last_entered_window;
                                     let (off_x, off_y) = state
                                         .windows
                                         .get(&x11_wid)

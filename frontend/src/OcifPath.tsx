@@ -64,6 +64,10 @@ export function OcifPath({
 			}}
 		>
 			<svg
+				// A freehand stroke has no describable content, so it is
+				// announced generically rather than left unlabelled.
+				role="img"
+				aria-label="Pen stroke"
 				width={bounds.width}
 				height={bounds.height}
 				viewBox={`${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`}

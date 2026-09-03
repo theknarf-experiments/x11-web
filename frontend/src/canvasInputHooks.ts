@@ -108,11 +108,18 @@ export function useWheelInput(
 	ref: RefObject<HTMLCanvasElement | null>,
 	onInputRef: RefObject<OnInput>,
 ): void {
+	// Mount-once by design: `ref` and `onInputRef` are RefObjects the
+	// caller owns, and reading `.current` inside the effect is the whole
+	// point of the pattern — the listener always sees the latest
+	// `onInput` without being torn down and re-bound on every render.
+	// Biome cannot tell a RefObject *parameter* from an ordinary value,
+	// so it asks for deps that are not reactive; adding `ref.current`
+	// would also re-run the effect when the canvas element swaps.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: RefObject params; `.current` is not a reactive dependency.
 	useEffect(() => {
 		const el = ref.current;
 		if (!el) return;
 		return attachWheelInput(el, (ev) => onInputRef.current(ev));
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 }
 
@@ -163,11 +170,18 @@ export function useTouchInput(
 	ref: RefObject<HTMLCanvasElement | null>,
 	onInputRef: RefObject<OnInput>,
 ): void {
+	// Mount-once by design: `ref` and `onInputRef` are RefObjects the
+	// caller owns, and reading `.current` inside the effect is the whole
+	// point of the pattern — the listener always sees the latest
+	// `onInput` without being torn down and re-bound on every render.
+	// Biome cannot tell a RefObject *parameter* from an ordinary value,
+	// so it asks for deps that are not reactive; adding `ref.current`
+	// would also re-run the effect when the canvas element swaps.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: RefObject params; `.current` is not a reactive dependency.
 	useEffect(() => {
 		const el = ref.current;
 		if (!el) return;
 		return attachTouchInput(el, (ev) => onInputRef.current(ev));
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 }
 
@@ -273,11 +287,18 @@ export function usePinchGesture(
 	ref: RefObject<HTMLCanvasElement | null>,
 	onInputRef: RefObject<OnInput>,
 ): void {
+	// Mount-once by design: `ref` and `onInputRef` are RefObjects the
+	// caller owns, and reading `.current` inside the effect is the whole
+	// point of the pattern — the listener always sees the latest
+	// `onInput` without being torn down and re-bound on every render.
+	// Biome cannot tell a RefObject *parameter* from an ordinary value,
+	// so it asks for deps that are not reactive; adding `ref.current`
+	// would also re-run the effect when the canvas element swaps.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: RefObject params; `.current` is not a reactive dependency.
 	useEffect(() => {
 		const el = ref.current;
 		if (!el) return;
 		return attachPinchGesture(el, (ev) => onInputRef.current(ev));
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 }
 
@@ -377,11 +398,18 @@ export function useSwipeGesture(
 	ref: RefObject<HTMLCanvasElement | null>,
 	onInputRef: RefObject<OnInput>,
 ): void {
+	// Mount-once by design: `ref` and `onInputRef` are RefObjects the
+	// caller owns, and reading `.current` inside the effect is the whole
+	// point of the pattern — the listener always sees the latest
+	// `onInput` without being torn down and re-bound on every render.
+	// Biome cannot tell a RefObject *parameter* from an ordinary value,
+	// so it asks for deps that are not reactive; adding `ref.current`
+	// would also re-run the effect when the canvas element swaps.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: RefObject params; `.current` is not a reactive dependency.
 	useEffect(() => {
 		const el = ref.current;
 		if (!el) return;
 		return attachSwipeGesture(el, (ev) => onInputRef.current(ev));
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 }
 
@@ -492,10 +520,17 @@ export function useDndBridge(
 	ref: RefObject<HTMLCanvasElement | null>,
 	onInputRef: RefObject<OnInput>,
 ): void {
+	// Mount-once by design: `ref` and `onInputRef` are RefObjects the
+	// caller owns, and reading `.current` inside the effect is the whole
+	// point of the pattern — the listener always sees the latest
+	// `onInput` without being torn down and re-bound on every render.
+	// Biome cannot tell a RefObject *parameter* from an ordinary value,
+	// so it asks for deps that are not reactive; adding `ref.current`
+	// would also re-run the effect when the canvas element swaps.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: RefObject params; `.current` is not a reactive dependency.
 	useEffect(() => {
 		const el = ref.current;
 		if (!el) return;
 		return attachDndBridge(el, (ev) => onInputRef.current(ev));
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 }

@@ -9,6 +9,7 @@ use std::time::Instant;
 /// Bundles the live modifier/group/controls tracking with the larger
 /// SetMap / SetNames / SetCompatMap / SetIndicatorMap bookkeeping that
 /// XKB clients can override.
+#[derive(Default)]
 pub(crate) struct XkbState {
     // -- live modifier / group state --------------------------------------
     /// Base modifiers (from currently pressed modifier keys).
@@ -103,57 +104,11 @@ pub(crate) struct XkbState {
     pub(crate) event_mask: u32,
 }
 
-impl Default for XkbState {
-    fn default() -> Self {
-        Self {
-            base_mods: 0,
-            latched_mods: 0,
-            locked_mods: 0,
-            base_group: 0,
-            latched_group: 0,
-            locked_group: 0,
-            controls: XkbControls::default(),
-            bounce_key_release_time: HashMap::new(),
-            sticky_mods: 0,
-
-            extra_groups: Vec::new(),
-            group_switch_keys: Vec::new(),
-            key_types: HashMap::new(),
-            key_actions: HashMap::new(),
-            key_behaviors: HashMap::new(),
-            explicit: HashMap::new(),
-            modmap: HashMap::new(),
-            vmodmap: HashMap::new(),
-            vmod_bindings: [0; 16],
-
-            indicators: 0,
-            indicator_maps: Vec::new(),
-            named_indicators: HashMap::new(),
-
-            names_atoms: HashMap::new(),
-            type_names: Vec::new(),
-            kt_level_names: Vec::new(),
-            group_names: Vec::new(),
-            indicator_name_atoms: Vec::new(),
-            vmod_names: Vec::new(),
-            key_names: HashMap::new(),
-            key_aliases: Vec::new(),
-
-            button_actions: HashMap::new(),
-            device_led_info: Vec::new(),
-
-            // Populated with default symbol interpretations by the
-            // connection initializer (calls `handlers::xkb::default_compat_si`).
-            // Default here is empty so the struct can be `Default::default()`
-            // without depending on the handler module.
-            compat_si: Vec::new(),
-            group_compat: <[XkbGroupCompat; 4]>::default(),
-
-            event_mask: 0,
-        }
-    }
-}
-
+// `Default` is derived: every field's natural default is the right
+// one. `compat_si` in particular starts EMPTY and is filled in by the
+// connection initializer (`handlers::xkb::default_compat_si`) rather
+// than here, so this module doesn't have to depend on the handler
+// module just to construct itself.
 
 impl XkbState {
     /// Effective (combined) modifiers: base | latched | locked.

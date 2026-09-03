@@ -259,6 +259,13 @@ function App() {
 	// Reap renderers and locally-closed entries for windows the
 	// backend has dropped. Renderer creation happens lazily during
 	// render so a window appears as soon as it lands in the list.
+	// `renderersRef` is a RefObject handed back by `useFrameRouter`, so
+	// biome sees an opaque object rather than a ref and asks for
+	// `renderersRef.current.keys` / `.delete` as dependencies. They are
+	// not reactive — the ref identity never changes, and listing method
+	// references would not make the effect re-run when the map does.
+	// `windows` is the real trigger and is already declared.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: renderersRef is a RefObject from useFrameRouter; its members are not reactive.
 	useEffect(() => {
 		const live = new Set(windows.map((w) => w.windowId));
 		for (const wid of [...renderersRef.current.keys()]) {
@@ -1179,6 +1186,10 @@ function App() {
 				)}
 				{drawing?.kind === "arrow" && (
 					<svg
+						// Drag-preview only: it exists between pointerdown and
+						// pointerup and is replaced by the real OcifArrow node.
+						// Nothing for a screen reader to gain from it.
+						aria-hidden="true"
 						style={{
 							position: "absolute",
 							left: Math.min(drawing.startX, drawing.endX) - 24,
@@ -1247,6 +1258,11 @@ function App() {
 					return (
 						<div
 							key={win.windowId}
+							// Positioning/hover-tracking wrapper only — every
+							// bit of interactivity lives in the WindowFrame
+							// inside it, so this element deliberately carries
+							// no semantics of its own.
+							role="none"
 							onMouseEnter={() => handleMouseEnterWindow(win.windowId)}
 						>
 							<WindowFrame

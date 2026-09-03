@@ -141,6 +141,11 @@ export function OcifArrow({
 			}}
 		>
 			<svg
+				// The visible line is painted by GL; this SVG only carries
+				// the hit path and the markers, so "Arrow" is the whole of
+				// its describable content.
+				role="img"
+				aria-label="Arrow"
 				className={s.svg}
 				width={layout.width}
 				height={layout.height}

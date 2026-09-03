@@ -69,7 +69,18 @@ export function Popover({
 
 	return (
 		<div ref={wrapRef} className={s.wrap} data-popover-open={open || undefined}>
-			<span className={s.trigger} onClick={() => setOpen((o) => !o)}>
+			{/* `role="none"` because this span is a pure click-forwarding
+			    wrapper: the real control is the caller's `trigger` (a
+			    `<button>` by contract), which already carries the focus
+			    ring and keyboard activation. Enter/Space on that button
+			    fires a click that bubbles here, so the wrapper needs no
+			    key handling of its own — and must not take a role that
+			    would nest a second widget inside the first. */}
+			<span
+				role="none"
+				className={s.trigger}
+				onClick={() => setOpen((o) => !o)}
+			>
 				{trigger}
 			</span>
 			{open && (

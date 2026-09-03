@@ -402,7 +402,9 @@ export function subscribe(
 }
 
 function notify(workspaceId: string) {
-	listeners.get(workspaceId)?.forEach((fn) => fn());
+	for (const fn of listeners.get(workspaceId) ?? []) {
+		fn();
+	}
 }
 
 /** Notify React subscribers synchronously; batch outbound sync

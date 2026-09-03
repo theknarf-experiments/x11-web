@@ -182,9 +182,27 @@ pub struct OcifRepresentation {
     pub location: Option<String>,
 }
 
+/// Canvas placement for a node, as five independent `f64`s.
+///
+/// Bundled into a struct rather than passed positionally: the five
+/// values are all the same type and all plausible in any order, so a
+/// transposed `width`/`height` or a `y` handed to `z` is a silent
+/// mis-placement the compiler cannot catch. Named fields at the call
+/// site make the mistake visible in the diff. (Deliberately not an
+/// `OcifNode` subset — this is the argument shape, not doc schema,
+/// and it never crosses the Automerge boundary as a unit.)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NodeGeometry {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// `@ocif/edge` — relation between two nodes referenced by id.
-/// Each endpoint is independently optional: `start = Some(id)`
-/// + `end = None` is a half-attached arrow (start anchored to a
+/// Each endpoint is independently optional: `start = Some(id)` +
+/// `end = None` is a half-attached arrow (start anchored to a
 /// node, end at the cached `arrow.end_x/y`), and vice versa.
 /// `directed = true` renders as start → end; `false` undirected.
 /// (OCIF v0.7's `@ocif/edge` requires both endpoints; we relax
@@ -308,12 +326,15 @@ impl WorkspaceEntry {
         &mut self,
         window_id: &str,
         sidecar_id: &str,
-        x: f64,
-        y: f64,
-        z: f64,
-        width: f64,
-        height: f64,
+        geom: NodeGeometry,
     ) -> bool {
+        let NodeGeometry {
+            x,
+            y,
+            z,
+            width,
+            height,
+        } = geom;
         let Some(nodes) = ensure_nodes_map(&mut self.doc) else {
             return false;
         };
@@ -520,6 +541,18 @@ fn read_string(doc: &AutoCommit, parent: &automerge::ObjId, key: &str) -> Option
 mod tests {
     use super::*;
 
+    /// These tests never assert on width/height, so pin them to one
+    /// size and let the call sites read as `geom(x, y, z)`.
+    fn geom(x: f64, y: f64, z: f64) -> NodeGeometry {
+        NodeGeometry {
+            x,
+            y,
+            z,
+            width: 100.0,
+            height: 80.0,
+        }
+    }
+
     fn drain_sync(
         backend: &mut WorkspaceEntry,
         peer_doc: &mut AutoCommit,
@@ -547,10 +580,10 @@ mod tests {
     #[test]
     fn attach_detach_window_node_idempotent_and_visible_to_peers() {
         let mut backend = WorkspaceEntry::new("Workspace 1");
-        assert!(backend.attach_window_node("win-a", "sc-1", 10.0, 20.0, 1.0, 100.0, 80.0));
+        assert!(backend.attach_window_node("win-a", "sc-1", geom(10.0, 20.0, 1.0)));
         // Second attach is a no-op (idempotent).
-        assert!(!backend.attach_window_node("win-a", "sc-1", 10.0, 20.0, 1.0, 100.0, 80.0));
-        assert!(backend.attach_window_node("win-b", "sc-1", 30.0, 40.0, 2.0, 100.0, 80.0));
+        assert!(!backend.attach_window_node("win-a", "sc-1", geom(10.0, 20.0, 1.0)));
+        assert!(backend.attach_window_node("win-b", "sc-1", geom(30.0, 40.0, 2.0)));
 
         // Sync to a peer and verify both window nodes arrive.
         let mut peer_doc = AutoCommit::new();

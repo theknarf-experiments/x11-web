@@ -304,6 +304,13 @@ export type X11Fixtures = {
 
 export const test = base.extend<{}, X11Fixtures>({
 	sidecarContainer: [
+		// Playwright discovers a fixture's dependencies by string-parsing
+		// this parameter: `fixtureParameterNames` throws unless the first
+		// argument is literally an object destructuring pattern, so a
+		// fixture with no dependencies has to spell that as `{}`. (The
+		// suppression has to be the line directly above the finding —
+		// biome ignores one that is separated by another comment.)
+		// biome-ignore lint/correctness/noEmptyPattern: Playwright requires the destructuring pattern
 		async ({}, use) => {
 			await ensureSetup();
 			await use(sidecarContainer);
@@ -314,6 +321,13 @@ export const test = base.extend<{}, X11Fixtures>({
 		{ scope: "worker", timeout: 600_000 },
 	],
 	frontendUrl: [
+		// Playwright discovers a fixture's dependencies by string-parsing
+		// this parameter: `fixtureParameterNames` throws unless the first
+		// argument is literally an object destructuring pattern, so a
+		// fixture with no dependencies has to spell that as `{}`. (The
+		// suppression has to be the line directly above the finding —
+		// biome ignores one that is separated by another comment.)
+		// biome-ignore lint/correctness/noEmptyPattern: Playwright requires the destructuring pattern
 		async ({}, use) => {
 			await ensureSetup();
 			// SPA + WS + auth all live on the backend's host port —

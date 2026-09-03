@@ -17,7 +17,12 @@ use super::super::core::ROOT_VISUAL;
 use super::super::types::{PixmapState, ShmPixmapBacking, ShmSegment};
 use crate::framebuffer::Framebuffer;
 use crate::xserver::core::require_len;
-use crate::xserver::reply::{serialize_reply, ReplyBuf};
+use crate::xserver::reply::serialize_reply;
+// Only the `CreateSegment` path builds a bare `ReplyBuf`, and that path is
+// `#[cfg(target_os = "linux")]` (it needs memfd + SCM_RIGHTS). Gating the
+// import to match keeps macOS host builds warning-free.
+#[cfg(target_os = "linux")]
+use crate::xserver::reply::ReplyBuf;
 use x11rb_protocol::protocol::shm::{
     AttachRequest, CreatePixmapRequest, DetachRequest, GetImageReply, GetImageRequest,
     PutImageRequest, QueryVersionReply, ATTACH_FD_REQUEST, ATTACH_REQUEST, CREATE_PIXMAP_REQUEST,

@@ -18,6 +18,10 @@
 	/* The bar is variable-width so it keeps CSS corners; a stretched
 	   superellipse would distort. Squircle where supported. */
 	border-radius: 22px;
+	/* biome-ignore lint/correctness/noUnknownProperty: `corner-shape` is
+	   real CSS (Borders & Box Decorations L4, shipped in Chromium 139);
+	   biome's known-property table predates it. Browsers without it
+	   drop the declaration and keep the plain rounded corner. */
 	corner-shape: squircle;
 	z-index: 100;
 }
@@ -160,6 +164,10 @@
 	backdrop-filter: blur(20px);
 	border: 1px solid rgba(255, 255, 255, 0.15);
 	border-radius: 14px;
+	/* biome-ignore lint/correctness/noUnknownProperty: `corner-shape` is
+	   real CSS (Borders & Box Decorations L4, shipped in Chromium 139);
+	   biome's known-property table predates it. Browsers without it
+	   drop the declaration and keep the plain rounded corner. */
 	corner-shape: squircle;
 	display: flex;
 	flex-direction: column;
