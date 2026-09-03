@@ -125,6 +125,35 @@ impl X11Server {
                 if let Ok(list) = std::env::var("X11WEB_DISABLE_EXTENSIONS") {
                     reg.disable_by_names(&list);
                 }
+                // GLX is OFF by default because advertising it breaks input
+                // in every GTK3 app, Firefox included.
+                //
+                // GDK probes visuals through GLX the first time a GTK3 client
+                // starts on a display, then caches the answer in a
+                // `GDK_VISUALS` property on the root window; later clients read
+                // that and skip the probe. A client that performs the probe
+                // ends up unable to dispatch pointer or key events at all —
+                // measured, not inferred: the first gtk3-demo on a fresh
+                // display reports `HOVER changed=false / PRESS changed=false`
+                // and the first Firefox never reacts to hover, click or a
+                // keystroke, while the *second* client of either kind works
+                // perfectly. Setting this one variable makes both work on the
+                // first try. The client is not at fault in any way we can see:
+                // with GLX on and off it creates the same windows with the same
+                // visual and depth and selects byte-identical event masks.
+                //
+                // Turning it off costs little today: `glXCreateContext` does
+                // not actually work here (glxgears fails with "Couldn't get GL
+                // visual config!"), so what we were advertising was a GL
+                // capability we cannot honour. `X11WEB_ENABLE_GLX=1` restores
+                // it — `e2e/tests/extensions/glx.spec.ts` runs with that set,
+                // so the GLX protocol coverage is unchanged.
+                // Note the emptiness check: the e2e fixture passes this
+                // through as `""` when unset, and `env::var` reports that as
+                // `Ok("")`, not an error.
+                if !std::env::var("X11WEB_ENABLE_GLX").is_ok_and(|v| !v.is_empty()) {
+                    reg.disable_by_names("GLX");
+                }
                 reg
             }),
         }

@@ -232,6 +232,30 @@ test("DIAG: firefox input with no timing assumptions", async ({
 		await page.waitForTimeout(5000);
 	}
 
+	// Phase 2b — leave and re-enter. This tests the leading hypothesis for
+	// the first-client deafness: XI2 crossings are only emitted when the
+	// pointer CHANGES window, and `build_xi_crossing_events_for` reads the
+	// per-connection `xi.selections`. If the client's one and only XI_Enter
+	// was emitted before it had called XISelectEvents, it missed it — and
+	// since `last_entered_window` is now set, no further Enter is generated
+	// while the pointer stays inside. GDK will not translate XI_Motion for a
+	// window it never saw an XI_Enter for, so the window is deaf forever.
+	// A fresh leave/re-enter cycle should deliver an Enter it can actually
+	// see. If blue appears after this, the hypothesis is confirmed.
+	await page.mouse.move(5, 5, { steps: 3 });
+	await page.waitForTimeout(1500);
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.5, {
+		steps: 8,
+	});
+	for (let i = 0; i < 4; i++) {
+		const s = await sample(`re-enter t=${i * 5}s`);
+		if (s.b > 0.4) {
+			console.log(`DIAG RE-ENTER WOKE IT after ~${i * 5}s`);
+			break;
+		}
+		await page.waitForTimeout(5000);
+	}
+
 	// Phase 3 — click, then sample.
 	await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.6);
 	for (let i = 0; i < 3; i++) {

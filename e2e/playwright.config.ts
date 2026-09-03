@@ -24,7 +24,19 @@ export default defineConfig({
 	// have already been collected, and `testIgnore` removes them before
 	// collection — verified, `playwright test tests/wayland --list`
 	// reports "Total: 0 tests in 0 files" without the variable.
-	testIgnore: process.env.X11WEB_WAYLAND_E2E ? [] : ["**/tests/wayland/**"],
+	//
+	// The GLX suite is opt-in for a different reason: GLX is disabled in
+	// the server by default because advertising it leaves the first GTK3
+	// client on a display — Firefox included — unable to dispatch input
+	// (see `crates/x11-server/src/xserver/mod.rs`). These tests are the
+	// one place that wants it on, so they run with it enabled:
+	//
+	//     X11WEB_GLX_E2E=1 X11WEB_ENABLE_GLX=1 pnpm exec playwright test tests/extensions/glx.spec.ts
+	//
+	testIgnore: [
+		...(process.env.X11WEB_WAYLAND_E2E ? [] : ["**/tests/wayland/**"]),
+		...(process.env.X11WEB_GLX_E2E ? [] : ["**/tests/extensions/glx.spec.ts"]),
+	],
 	// 60s is enough for protocol/atom probe tests; specific slow tests
 	// (rendercheck full suite, x11perf, etc.) override this with
 	// test.setTimeout(...) where they actually need more.

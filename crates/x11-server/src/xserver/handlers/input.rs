@@ -380,11 +380,26 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
     // was ever told the pointer had entered their window. GTK3 will not act
     // on a click until it has seen that Enter, which is why `xdotool
     // mousemove` followed by `xdotool click` read as total input deafness.
-    let (old_window, _, _) = super::xtest::find_subwindow_in_shared(state, old_px, old_py, 0);
-    for (window, mask, ev) in super::super::input::build_shared_crossing_events(
-        state, old_window, new_window, new_x, new_y,
-    ) {
-        state.deliver_event(window, mask, &ev);
+    // Try the ancestry-aware in-connection builder first. When the caller
+    // owns the windows involved it produces the correct
+    // Ancestor/Virtual/Inferior/Nonlinear detail values that the crossing
+    // conformance tests check, and routing them onto our own queue is right
+    // because they are our own windows. It emits nothing when the windows
+    // belong to a different client — that is the cross-client case, and only
+    // then do we fall back to the shared-registry routing below.
+    let crossing =
+        super::super::input::build_crossing_events(state, new_window, new_x, new_y, new_x, new_y);
+    if !crossing.is_empty() {
+        for chunk in crossing.chunks_exact(32) {
+            state.pending_events.push(chunk.to_vec());
+        }
+    } else {
+        let (old_window, _, _) = super::xtest::find_subwindow_in_shared(state, old_px, old_py, 0);
+        for (window, mask, ev) in super::super::input::build_shared_crossing_events(
+            state, old_window, new_window, new_x, new_y,
+        ) {
+            state.deliver_event(window, mask, &ev);
+        }
     }
 
     // Send MotionNotify event to let the client know the pointer moved

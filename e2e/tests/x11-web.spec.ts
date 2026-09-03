@@ -12,6 +12,12 @@ import {
 	waitForDock,
 } from "./fixtures";
 
+// GLX is opt-in: advertising it leaves the first GTK3 client on a display
+// unable to dispatch input (see crates/x11-server/src/xserver/mod.rs). The
+// GLX-specific coverage lives in tests/extensions/glx.spec.ts, which runs
+// with X11WEB_ENABLE_GLX=1.
+const GLX_ENABLED = !!process.env.X11WEB_ENABLE_GLX;
+
 // No per-file cleanup hook: `fixtures.ts` resets the worker's X server
 // before every test via the auto `x11Clean` fixture, so every spec file
 // gets it rather than just this one.
@@ -833,17 +839,12 @@ test("firefox responds to mouse and keyboard input", async ({
 	page,
 	frontendUrl,
 }) => {
-	// KNOWN BROKEN: GTK3 apps (Firefox, gtk3-demo — core and XI2 input
-	// modes alike) receive a wire-correct event stream (verified with
-	// xtrace against an Xvfb baseline; see e2e/tests/debug-ext.spec.ts)
-	// but never dispatch pointer/key events to widgets. ClientMessage
-	// (WM_DELETE) on the same connection IS processed. test.fail()
-	// keeps the suite green while alarming when input starts working —
-	// remove the annotation then.
-	test.fail(
-		true,
-		"GTK3 input dispatch dead on our server — under investigation",
-	);
+	// This was annotated `test.fail` for a long time: GTK3 apps received a
+	// wire-correct event stream but never dispatched pointer/key events to
+	// widgets. The cause was ours — advertising GLX made GDK's first-client
+	// visual probe leave the app unable to dispatch input at all. GLX is now
+	// off by default (see crates/x11-server/src/xserver/mod.rs) and this
+	// passes, so the annotation is gone per its own instructions.
 	test.setTimeout(240_000);
 	await page.goto(frontendUrl);
 	await waitForDock(page);
@@ -2173,7 +2174,6 @@ test("xdpyinfo reports all registered extensions", async ({
 		"XVideo",
 		"DOUBLE-BUFFER",
 		"XINERAMA",
-		"GLX",
 	];
 	for (const ext of expectedExtensions) {
 		expect(result.output).toContain(ext);
@@ -2192,9 +2192,12 @@ test("xdpyinfo extension count is exactly 24", async ({ sidecarContainer }) => {
 
 	const countMatch = result.output.match(/number of extensions:\s+(\d+)/);
 	expect(countMatch).not.toBeNull();
-	// 25 extensions currently advertised. Bump this if we ship more; if it
-	// goes down we want to know an extension regressed.
-	expect(Number(countMatch![1])).toBe(25);
+	// 25 with GLX, 24 without. GLX is off by default because advertising it
+	// leaves the first GTK3 client on a display unable to dispatch input at
+	// all (see crates/x11-server/src/xserver/mod.rs); X11WEB_ENABLE_GLX=1
+	// turns it back on. Bump these if we ship more; if the count goes down
+	// we want to know an extension regressed.
+	expect(Number(countMatch![1])).toBe(GLX_ENABLED ? 25 : 24);
 });
 
 test("xprop -root reports EWMH atoms", async ({ sidecarContainer }) => {
@@ -2691,6 +2694,7 @@ test("xev exits cleanly after receiving events", async ({
 });
 
 test("GLX extension is queryable", async ({ sidecarContainer }) => {
+	test.skip(!GLX_ENABLED, "GLX is opt-in — see tests/extensions/glx.spec.ts");
 	// Verify GLX is advertised and responds to version queries
 	const result = await sidecarContainer.exec([
 		"bash",
@@ -4540,6 +4544,7 @@ test("Bell request via xset b does not crash server", async ({
 test("GLX extension reports version and visual configs", async ({
 	sidecarContainer,
 }) => {
+	test.skip(!GLX_ENABLED, "GLX is opt-in — see tests/extensions/glx.spec.ts");
 	const result = await sidecarContainer.exec([
 		"bash",
 		"-c",
@@ -4734,7 +4739,6 @@ test("xdpyinfo lists all 24 registered extensions", async ({
 		"XVideo",
 		"DOUBLE-BUFFER",
 		"XINERAMA",
-		"GLX",
 	];
 	for (const ext of expectedExtensions) {
 		expect(result.output).toContain(ext);
