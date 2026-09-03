@@ -316,16 +316,28 @@ export type X11TestFixtures = {
 };
 
 export const test = base.extend<X11TestFixtures, X11Fixtures>({
-	// Reset the worker's shared X server BEFORE each test rather than after.
-	// Before is strictly stronger: a test that crashes, times out, or is
-	// interrupted never runs its own teardown, and doing the reset up front
-	// means the next test still starts clean. It also makes the guarantee
-	// independent of whether a given spec file remembered to opt in — this
-	// fixture is `auto`, so all ~60 spec files get it.
+	// Reset the worker's shared X server AFTER each test. The fixture is `auto`,
+	// so all ~60 spec files get it rather than the 2 that used to opt in.
+	//
+	// Teardown, not setup, and the ordering matters. Killing an app makes the
+	// sidecar emit a `ProcessExited` DELTA; the frontend's dock is built from
+	// those deltas and is only re-synced in full when it asks for a
+	// `ProcessList` at connect time. Resetting at setup put the kill moments
+	// before the next test's `page.goto`, dropping that delta straight into the
+	// window where the new page has not subscribed yet — the delta is lost and
+	// the dock keeps a phantom entry with nothing to correct it. Observed
+	// exactly that: `dbusmenu-test` still in the dock four tests after it died,
+	// still owning the menu bar, while its window frame was correctly gone.
+	//
+	// Running at teardown puts the whole inter-test gap between the kill and
+	// the next page load. Playwright runs fixture teardown even when a test
+	// times out or fails (confirmed in the traces of the 60s timeouts, which
+	// show `Fixture "x11Clean"` under After Hooks), so this is no less
+	// crash-safe than resetting at setup.
 	x11Clean: [
 		async ({ sidecarContainer }, use) => {
-			await cleanupApps(sidecarContainer);
 			await use();
+			await cleanupApps(sidecarContainer);
 		},
 		{ auto: true },
 	],
@@ -706,16 +718,37 @@ async function captureBaselineProcesses(
  *
  * Bounded: a `docker exec` that hangs under load must not eat the test's whole
  * budget, so give up after 20s and let the test proceed rather than block.
+ *
+ * A reset that does not complete is REPORTED, never swallowed. Silently
+ * half-failing cleanup is exactly what made the old allowlist version so hard
+ * to reason about: it SIGKILLed its own shell, both call sites discarded the
+ * error, and the only symptom was another test failing later on a stale window
+ * count. If a run shows leaked frames, this log line is the thing to look for.
  */
 export async function cleanupApps(
 	container: StartedTestContainer,
 ): Promise<void> {
 	if (!container) return;
 	const script = RESET_SCRIPT.replace("__BASELINE__", baselineProcesses);
-	await Promise.race([
-		container.exec(["bash", "-c", script]).catch(() => {}),
-		new Promise((r) => setTimeout(r, 20_000)),
+	const TIMED_OUT = Symbol("reset-timeout");
+	const outcome = await Promise.race([
+		container
+			.exec(["bash", "-c", script])
+			.then((r) =>
+				r.exitCode === 0 ? null : `exit ${r.exitCode}: ${r.output}`,
+			)
+			.catch((e) => `threw: ${e}`),
+		new Promise<typeof TIMED_OUT>((r) =>
+			setTimeout(() => r(TIMED_OUT), 20_000),
+		),
 	]);
+	if (outcome === TIMED_OUT) {
+		console.warn(
+			`[worker ${WORKER_INDEX}] X reset did not finish within 20s — the next test may see leaked windows`,
+		);
+	} else if (outcome) {
+		console.warn(`[worker ${WORKER_INDEX}] X reset failed: ${outcome}`);
+	}
 }
 
 // Register cleanup on process termination signals.
