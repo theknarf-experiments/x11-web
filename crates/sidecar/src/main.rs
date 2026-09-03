@@ -586,24 +586,6 @@ async fn run_session(
                         return;
                     }
                 }
-                Some((client_id, update)) = display_rx.recv() => {
-                    // x11-server emits raw RGBA in PutImage. The
-                    // wire format is WebP-lossless; encode here so
-                    // the X server library doesn't have to know
-                    // about pixel codecs. Other DisplayUpdate
-                    // variants pass through unchanged.
-                    let update = encode_for_wire(update);
-                    if let Some(m) = telemetry::metrics() {
-                        let kind = match &update {
-                            x11_web_protocol::DisplayUpdate::PutImage { .. } => "put_image",
-                            x11_web_protocol::DisplayUpdate::WindowThumbnail { .. } => "thumbnail",
-                            _ => "other",
-                        };
-                        m.display_updates
-                            .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
-                    }
-                    let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
-                }
                 Some((client_id, peer_pid)) = client_connected_rx.recv() => {
                     // Prefer matching against the full spawn history (covers
                     // wrapper-exits-fast launchers like LibreOffice and
@@ -638,9 +620,67 @@ async fn run_session(
         }
     };
 
+    // Display updates get their own future rather than a `select!` arm
+    // in `events_loop`, and that is the point: WebP-lossless encoding a
+    // full-window frame costs 100-300 ms, and an arm body runs to
+    // completion before the loop re-selects. Sharing the loop meant
+    // every input event, every heartbeat and every wire write queued
+    // behind an encode — so a repainting app made the desktop feel
+    // unresponsive to the mouse. As a sibling of `events_loop` in the
+    // final `select!` it is polled concurrently instead, and
+    // `spawn_blocking` keeps the CPU work off the async worker
+    // entirely. Ported from `crates/sidecar-wayland`, which got this
+    // treatment first.
+    //
+    // The loop stays *sequential* — each encode is awaited before the
+    // next update is taken. That is deliberate, not laziness: X11
+    // PutImage carries a damage rectangle and the frontend blits it
+    // onto a persistent canvas (`ClientRenderer.ts`), so the updates
+    // are incremental and encoding them in parallel would let a small
+    // late rect land before the large earlier one it overlaps.
+    let tx_display = tx.clone();
+    let display_loop = async {
+        while let Some((client_id, update)) = display_rx.recv().await {
+            // x11-server emits raw RGBA in PutImage. The wire format is
+            // WebP-lossless; encode here so the X server library
+            // doesn't have to know about pixel codecs. Other
+            // DisplayUpdate variants pass through unchanged and aren't
+            // worth a runtime hop.
+            let update = if matches!(update, DisplayUpdate::PutImage { .. }) {
+                match tokio::task::spawn_blocking(move || encode_for_wire(update)).await {
+                    Ok(u) => u,
+                    // The blocking pool only fails this way on runtime
+                    // shutdown; there is nothing left to send to.
+                    Err(e) => {
+                        warn!("PutImage encode task failed: {e}");
+                        return;
+                    }
+                }
+            } else {
+                update
+            };
+            if let Some(m) = telemetry::metrics() {
+                let kind = match &update {
+                    DisplayUpdate::PutImage { .. } => "put_image",
+                    DisplayUpdate::WindowThumbnail { .. } => "thumbnail",
+                    _ => "other",
+                };
+                m.display_updates
+                    .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
+            }
+            if tx_display
+                .send(SidecarToBackend::DisplayUpdate { client_id, update })
+                .is_err()
+            {
+                return;
+            }
+        }
+    };
+
     tokio::select! {
         _ = recv_loop => {}
         _ = events_loop => {}
+        _ = display_loop => {}
     }
 
     heartbeat_task.abort();
