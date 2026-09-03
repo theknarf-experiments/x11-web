@@ -302,7 +302,29 @@ export type X11Fixtures = {
 	frontendUrl: string;
 };
 
-export const test = base.extend<{}, X11Fixtures>({
+/** Test-scoped fixtures. `x11Clean` is auto — see `cleanupApps` below. */
+export type X11TestFixtures = {
+	// Playwright types a fixture that provides no value as `void` (that is what
+	// `use()` with no argument yields), so this is the idiomatic spelling
+	// rather than a confusing one.
+	// biome-ignore lint/suspicious/noConfusingVoidType: Playwright's type for a value-less fixture
+	x11Clean: void;
+};
+
+export const test = base.extend<X11TestFixtures, X11Fixtures>({
+	// Reset the worker's shared X server BEFORE each test rather than after.
+	// Before is strictly stronger: a test that crashes, times out, or is
+	// interrupted never runs its own teardown, and doing the reset up front
+	// means the next test still starts clean. It also makes the guarantee
+	// independent of whether a given spec file remembered to opt in — this
+	// fixture is `auto`, so all ~60 spec files get it.
+	x11Clean: [
+		async ({ sidecarContainer }, use) => {
+			await cleanupApps(sidecarContainer);
+			await use();
+		},
+		{ auto: true },
+	],
 	sidecarContainer: [
 		// Playwright discovers a fixture's dependencies by string-parsing
 		// this parameter: `fixtureParameterNames` throws unless the first
@@ -544,25 +566,78 @@ export async function runPythonScript(
 	return container.exec(["bash", "-c", cmd]);
 }
 
-/** Kill all spawned X11 apps between tests. */
+// ---------------------------------------------------------------------------
+// Per-test X server reset
+// ---------------------------------------------------------------------------
+//
+// `sidecarContainer` is worker-scoped, so ONE X server serves every test that
+// worker ever runs (~160 tests per server at 2 workers). Nothing about that
+// server is per-test: its clients, its pointer and its selections all persist.
+// So state a test leaves behind is state the next test on that worker sees.
+//
+// The previous cleanup was an opt-in ALLOWLIST of app names, wired into only 2
+// of ~60 spec files. It had three defects, all fixed here:
+//
+//   1. It missed apps. `xcalc`, `gtkprobe` and `xev` are spawned by the suite
+//      and were absent from the pattern, so they stayed mapped for the rest of
+//      the run and showed up as extra `[data-testid="window-frame"]`s in later
+//      tests (the frontend's WindowList is backend-authoritative, so a leaked
+//      X client is a visible window on the next page load). Any app added to
+//      the suite in future would have silently joined them.
+//   2. `pkill -9 -f '<pattern>'` matched the `bash -c` shell running it,
+//      because that shell's own command line contains the pattern. It
+//      SIGKILLed itself, so the exec's exit status was meaningless and both
+//      call sites swallowed it with `.catch(() => {})` — cleanup could
+//      half-fail invisibly. Killing by pid avoids pattern matching entirely.
+//   3. It reset no other shared X state (pointer, selections), and it padded
+//      with a blanket 2s sleep — a guess, not a condition, and ~6.7 minutes of
+//      pure sleep across this suite.
+//
+// Instead: enumerate the sidecar's own child processes and kill everything
+// that is not one of the two infrastructure daemons it starts (`dbus-daemon`,
+// from crates/sidecar/src/main.rs, and `pulseaudio`, from
+// crates/sidecar/entrypoint.sh). Every X11 app the suite spawns is a direct
+// child of the sidecar, so this needs no app names and covers apps added
+// later. Zombies are skipped — the sidecar reaps its own children, and a
+// not-yet-reaped entry is already gone from the X server's point of view.
+//
+// Then wait on the actual condition (`xlsclients` reporting zero connected
+// clients) rather than on a fixed sleep.
+const RESET_SCRIPT = `
+set -u
+export DISPLAY=:99
+sidecar=$(pgrep -x x11-web-sidecar | head -1)
+if [ -n "\${sidecar:-}" ]; then
+  victims=$(ps -eo pid=,ppid=,stat=,comm= | awk -v s="$sidecar" \
+    '$2==s && $3 !~ /^Z/ && $4!="dbus-daemon" && $4!="pulseaudio" {print $1}')
+  [ -n "$victims" ] && kill -9 $victims 2>/dev/null
+fi
+# Wait for the X server to actually drop those client connections.
+for _ in $(seq 1 50); do
+  n=$(xlsclients 2>/dev/null | wc -l)
+  [ "$n" -eq 0 ] && break
+  sleep 0.1
+done
+# Reset the remaining server-wide state a later test could otherwise inherit:
+# the pointer (shared, initialised once per sidecar and never reset) and the
+# X selections (the clipboard round-trip test asserts on their contents).
+xdotool mousemove 0 0 2>/dev/null
+xsel -c -b 2>/dev/null
+xsel -c -p 2>/dev/null
+rm -rf /root/.mozilla /root/.cache/mozilla 2>/dev/null
+true
+`;
+
+/**
+ * Reset the worker's X server to a clean slate: no client apps, pointer at the
+ * origin, empty selections. Runs automatically before every test via the
+ * `x11Clean` auto-fixture; exported for the few places that need an extra
+ * mid-test reset.
+ */
 export async function cleanupApps(
 	container: StartedTestContainer,
 ): Promise<void> {
-	await container
-		?.exec([
-			"bash",
-			"-c",
-			"pkill -9 -f 'xeyes|xterm|xlogo|xclock|xmessage|zenity|firefox|vim|gimp|gtk3-demo|gnome-calculator|qpdfview|libreoffice|soffice|emacs|gnome-text-editor|dbusmenu-test' 2>/dev/null; true",
-		])
-		.catch(() => {});
-	await container
-		?.exec([
-			"bash",
-			"-c",
-			"rm -rf /root/.mozilla /root/.cache/mozilla 2>/dev/null; true",
-		])
-		.catch(() => {});
-	await new Promise((r) => setTimeout(r, 2000));
+	await container?.exec(["bash", "-c", RESET_SCRIPT]).catch(() => {});
 }
 
 // Register cleanup on process termination signals.

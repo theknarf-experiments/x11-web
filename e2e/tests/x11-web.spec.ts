@@ -1,7 +1,6 @@
 import type { Locator } from "@playwright/test";
 import {
 	canvasPixelHash,
-	cleanupApps,
 	colorFraction,
 	countNonBlackPixels,
 	expect,
@@ -13,9 +12,9 @@ import {
 	waitForDock,
 } from "./fixtures";
 
-test.afterEach(async ({ sidecarContainer }) => {
-	await cleanupApps(sidecarContainer);
-});
+// No per-file cleanup hook: `fixtures.ts` resets the worker's X server
+// before every test via the auto `x11Clean` fixture, so every spec file
+// gets it rather than just this one.
 
 test("dock is visible", async ({ page, frontendUrl }) => {
 	await page.goto(frontendUrl);
