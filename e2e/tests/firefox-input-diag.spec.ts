@@ -298,10 +298,8 @@ test("DIAG: firefox input with no timing assumptions", async ({
 				'grep -oE "Event (MotionNotify|ButtonPress|ButtonRelease|KeyPress|KeyRelease|EnterNotify|LeaveNotify)" /tmp/ff-trace.log | sort | uniq -c; ' +
 					'echo "--- which windows are the crossings/motion addressed to:"; ' +
 					'grep -E "Event (MotionNotify|EnterNotify|LeaveNotify|ButtonPress)" /tmp/ff-trace.log | grep -oE "event=0x[0-9a-f]+" | sort | uniq -c; ' +
-					'echo "--- GLX requests Firefox makes:"; ' +
-					'grep -oE "GLX-Request\\([0-9]+,[0-9]+\\): [A-Za-z]+" /tmp/ff-trace.log | sort | uniq -c | sort -rn | head -12; ' +
-					'echo "--- errors returned to Firefox:"; ' +
-					'grep -iE "Error" /tmp/ff-trace.log | cut -c1-140 | sort | uniq -c | sort -rn | head -8',
+					'echo "--- the actual crossing/motion event fields:"; ' +
+					'grep -E "Event (EnterNotify|LeaveNotify|MotionNotify)" /tmp/ff-trace.log | cut -c1-190 | head -8',
 			])
 			.then((r) => r.output);
 		console.log(`DIAG DELIVERED:\n${counts}`);

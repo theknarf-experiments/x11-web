@@ -412,22 +412,40 @@ fn make_crossing_event(
         0
     };
 
-    // Determine focus bit: true if event_window is an ancestor of (or is) the focus window.
-    let has_focus = {
-        let mut cur = focus_window;
+    // Focus bit, per the X11 protocol's definition for EnterNotify/LeaveNotify:
+    // "the focus field is True if the event window is the focus window or an
+    // INFERIOR of the focus window".
+    //
+    // This walked the tree the other way round — up from the focus window
+    // looking for the event window, i.e. it reported True when the event
+    // window was an ANCESTOR of the focus window, and False for the inferiors
+    // the spec actually asks about. The visible symptom is a crossing into a
+    // toolkit's child window arriving without the focus flag: Xvfb sends
+    // `flags=focus,same-screen` for the same enter where we sent only
+    // `flags=same-screen`.
+    //
+    // PointerRoot (1) and None (0) are the two special focus values; with
+    // PointerRoot the focus follows the pointer, so every window under it
+    // qualifies.
+    const FOCUS_POINTER_ROOT: u32 = 1;
+    let has_focus = if focus_window == FOCUS_POINTER_ROOT || focus_window == root_window {
+        true
+    } else if focus_window == 0 {
+        false
+    } else {
+        let mut cur = event_window;
         let mut found = false;
         for _ in 0..super::window_tree::MAX_TREE_DEPTH {
-            if cur == event_window {
+            if cur == focus_window {
                 found = true;
                 break;
             }
-            if cur == 0 {
+            if cur == 0 || cur == root_window {
                 break;
             }
-            if let Some(w) = windows.get(&cur) {
-                cur = w.parent;
-            } else {
-                break;
+            match windows.get(&cur) {
+                Some(w) if w.parent != cur => cur = w.parent,
+                _ => break,
             }
         }
         found
