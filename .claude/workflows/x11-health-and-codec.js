@@ -421,6 +421,24 @@ ${H_DET}${H_CODEC}
 FLAKINESS HYPOTHESES FROM TRIAGE:
 ${triage[1] ? `${triage[1].summary}\n${triage[1].hypotheses.map((h) => `- [${h.confidence}] ${h.target}: ${h.hypothesis}\n    test: ${h.howToTest}`).join('\n')}` : '(flakiness triage returned nothing — derive it yourself)'}
 
+STATE ON DISK — READ THIS FIRST. A previous attempt at THIS STAGE died mid-flight on a transient API
+error (529 Overloaded), after doing real work. You are its continuation, not a fresh start. Before
+anything else run \`git log --oneline main..HEAD\` and \`git status\`, and read \`git diff\`.
+  * It had already committed its findings up to that point (expect commits touching
+    \`e2e/tests/fixtures.ts\`, \`e2e/global-setup.ts\`, and an x11-server WindowDestroyed fix).
+  * It left an UNCOMMITTED change to \`e2e/tests/fixtures.ts\`: \`spawnApp\` now waits for a
+    \`data-client-id\` that was not in the pre-spawn snapshot, instead of waiting for the window-frame
+    count to reach \`idsBefore.size + 1\`. Its recorded evidence: the count condition failed one test in
+    each of three consecutive full runs — a different test each time, always the same call log
+    ("resolved to 2 elements ... resolved to 1 element", expected 3, received 1) — because the window
+    list is backend-authoritative and arrives asynchronously after \`page.goto\`, so the snapshot can be
+    taken while rows from the previous test are still draining. Once two drain out, \`2 + 1\` is
+    unreachable and a spawn that actually succeeded times out.
+  * That reasoning looks sound and the new condition is strictly stronger than the old one, but it was
+    NEVER VERIFIED — the agent died before finishing its runs. Your job is to verify it and land it,
+    not to re-derive it. If your runs show it is wrong, fix or revert it and say so.
+Do not redo analysis that is already committed. Build on it.
+
 YOUR STAGE — make the suite trustworthy under parallel execution.
 
 The deterministic bugs are (mostly) fixed by now, so what remains failing at 2 workers and passing at
