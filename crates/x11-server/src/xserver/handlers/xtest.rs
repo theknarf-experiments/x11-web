@@ -313,7 +313,7 @@ pub(crate) fn handle_xtest_request(state: &mut ClientState, data: &[u8], seq: u1
 /// use the standard `find_event_subwindow` on it. Instead we descend
 /// by scanning every window with a matching `parent` — slower but
 /// correct.
-fn find_subwindow_in_shared(
+pub(crate) fn find_subwindow_in_shared(
     state: &super::super::client::ClientState,
     root_x: i16,
     root_y: i16,

@@ -353,19 +353,23 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
     let new_y = state.pointer_y;
 
     // Find the deepest mapped window under the new pointer position.
-    // Use find_deepest_window (geometry-only) rather than find_event_subwindow
-    // because crossing events must be generated based on which window the
-    // pointer is IN, regardless of whether that window selects for crossing
-    // events.  The emit_crossing helper filters by event mask later.
-    let new_window = {
-        let (w, _, _) = super::super::input::find_deepest_window(
-            &state.windows,
-            state.root_window,
-            new_x,
-            new_y,
-        );
-        w
-    };
+    //
+    // This MUST consult the shared registry, not `state.windows`. The
+    // pointer is server-wide but `state.windows` only holds the *warping*
+    // client's own windows, so a cross-client warp — which is every warp
+    // that matters, `xdotool mousemove` included — found nothing and fell
+    // back to the root. The motion event was then addressed to the root
+    // and pushed onto the warping client's own queue, so the client under
+    // the pointer received nothing at all. GTK3 tracks the pointer through
+    // these events, so a warp followed by a click looked like total input
+    // deafness: the click arrived (buttons are broadcast) but GDK had never
+    // been told the pointer was inside the window, and dropped it.
+    let (new_window, event_x, event_y) = super::xtest::find_subwindow_in_shared(
+        state,
+        new_x,
+        new_y,
+        u32::from(crate::xserver::core::EventMask::POINTER_MOTION),
+    );
 
     // Generate crossing events for the pointer move
     let crossing =
@@ -386,14 +390,22 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
             child: 0,
             root_x: state.pointer_x,
             root_y: state.pointer_y,
-            event_x: state.pointer_x,
-            event_y: state.pointer_y,
+            event_x,
+            event_y,
             state: 0u16.into(),
             same_screen: true,
         },
         state.msb_first,
     );
-    state.pending_events.push(event);
+    // Deliver to whoever selected motion on the window under the pointer —
+    // locally if that is us, and broadcast to the owning client otherwise.
+    // Pushing straight onto `state.pending_events`, as this did, sent every
+    // warp-generated motion event to the warping client and nobody else.
+    state.deliver_event(
+        new_window,
+        crate::xserver::core::EventMask::POINTER_MOTION,
+        &event,
+    );
 
     Vec::new()
 }
