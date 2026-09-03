@@ -77,6 +77,15 @@ impl ProcessManager {
         let mut cmd = Command::new(command);
         cmd.args(args)
             .env("DISPLAY", &self.display_string)
+            // Force Mesa down the indirect GLX path.
+            //
+            // There is no DRI device here, but `swrast_dri.so` exists, so
+            // Mesa tries direct rendering, fails, and `glXCreateContext`
+            // returns NULL rather than falling back — glxgears dies with
+            // "Error: glXCreateContext failed". With this set the very same
+            // binary runs at ~12,600 FPS against our OSMesa GLX, so the
+            // indirect path works fine and only the direct probe was broken.
+            .env("LIBGL_ALWAYS_INDIRECT", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
