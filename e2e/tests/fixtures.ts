@@ -634,13 +634,25 @@ victims=$(ps -eo pid=,ppid=,stat=,comm= | awk -v base="$baseline" '
   ($1 in keep) && keep[$1] == $4 { next }  # infrastructure from the snapshot
   { print $1 }
 ')
-[ -n "$victims" ] && kill -9 $victims 2>/dev/null
+killed=""
+if [ -n "$victims" ]; then
+  kill -9 $victims 2>/dev/null
+  killed=yes
+fi
 # Wait for the X server to actually drop those client connections.
 for _ in $(seq 1 50); do
   n=$(xlsclients 2>/dev/null | wc -l)
   [ "$n" -eq 0 ] && break
   sleep 0.1
 done
+# xlsclients reaching 0 only proves the X SERVER has dropped the clients. The
+# frontend's window list is backend-authoritative and travels
+# sidecar -> backend -> browser, and that hop is not observable from in here.
+# Without this settle the next test can navigate while dead windows are still
+# in the list and then watch them drain away mid-test: measured directly, a
+# spawnApp snapshotted countBefore=2 and the failure DOM had 0 frames.
+# Only pay it when we actually killed something.
+[ -n "$killed" ] && sleep 1
 # Reset the remaining server-wide state a later test could otherwise inherit:
 # the pointer (shared, initialised once per sidecar and never reset) and the
 # X selections (the clipboard round-trip test asserts on their contents).

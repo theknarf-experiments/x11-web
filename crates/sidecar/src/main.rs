@@ -13,7 +13,14 @@ use tokio::time::{interval, Duration};
 /// How often the sidecar pings the backend to keep the connection alive.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 /// Polling cadence for reaping exited child processes.
-const PROCESS_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+///
+/// This is user-visible latency, not just bookkeeping: reaping a child is what
+/// emits `ProcessExited`, and that is what removes the app from the frontend's
+/// dock. At the previous 2s an app that had already quit stayed in the dock for
+/// up to two seconds. The work per tick is a `try_wait` per live child — a
+/// non-blocking `waitpid` — so polling four times as often costs essentially
+/// nothing and makes the dock track reality closely enough to look immediate.
+const PROCESS_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 /// Timeout for `dbus-daemon`'s `--print-address` line on startup; also the
 /// reconnect delay when the backend QUIC link drops.
 const DBUS_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
