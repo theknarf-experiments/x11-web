@@ -6,13 +6,48 @@
  *     X11WEB_FIREFOX_DIAG=1 pnpm --filter x11-web-e2e exec playwright test \
  *       --workers=1 --repeat-each=4 tests/firefox-input-diag.spec.ts
  *
- * THE FINDING: only the FIRST Firefox launch in a fresh container is
- * deaf. Every later launch in the same container works instantly. That
- * is 100% consistent across repeats and takes ~8 minutes, replacing the
- * old belief that this was an unreproducible intermittency.
+ * THE FINDING: only the FIRST GTK3 client in a fresh container is deaf.
+ * Every later one works instantly. This is NOT Firefox-specific, and it
+ * is 100% consistent across repeats, which replaces the old belief that
+ * this was an unreproducible intermittency.
  *
  * Iteration 1: hover/click/key all 0.000 for 25-55s.
  * Iterations 2+: `HOVER WORKED after ~0s`, then click and key.
+ *
+ * The SHORTEST reproducer is not this file — it is the existing
+ * gtk3-demo probe, ~2 minutes, no Firefox involved:
+ *
+ *     X11_INPUT_DEBUG=1 pnpm --filter x11-web-e2e exec playwright test \
+ *       --workers=1 --repeat-each=2 -g "gtk3-demo reacts to hover"
+ *     run 1: GTK3 HOVER changed=false   GTK3 PRESS changed=false
+ *     run 2: GTK3 HOVER changed=true    GTK3 PRESS changed=true
+ *
+ * That also explains why the earlier investigation concluded "GTK3 input
+ * is FIXED, Firefox is specially broken": gtkprobe was never the first
+ * GTK3 client in its container. The conclusion was a test-ordering
+ * artifact. Note the gtk3-demo probe runs with GDK_CORE_DEVICE_EVENTS=1,
+ * i.e. XI2 bypassed client-side, and is STILL deaf when first — so this
+ * is not simply an XI2 story either.
+ *
+ * WHAT WARMS IT (DIAG_PREWARM=<cmd>, run in an otherwise fresh container
+ * before Firefox):
+ *     none       -> deaf
+ *     xterm      -> deaf     (a plain core-events client is not enough)
+ *     glxgears   -> deaf     (it does reach our GLX: glXCreateContext failed)
+ *     gtk3-demo  -> WORKS    (any GTK3 client warms it)
+ *
+ * AND THE DECISIVE ONE — DIAG_PREWARM_XVFB=1 runs gtk3-demo against a
+ * throwaway Xvfb on :78, so every container-level side effect of "a GTK3
+ * app has run here" happens (dbus activation, fontconfig, GTK caches,
+ * libraries paged in) while our server on :99 never sees a GTK3 client.
+ * Result: STILL DEAF. So the warming is not environmental — it is state
+ * inside OUR X SERVER PROCESS, created when the first GTK3 client
+ * connects to it. The bug is ours.
+ *
+ * NEXT STEP: xtrace the first and second GTK3 client against :99 and
+ * diff them. The difference in what the server answers — most likely an
+ * atom, a property, or a device/extension query that only resolves once
+ * some other client has interned or created it — should name the bug.
  *
  * RULED OUT, each by measurement rather than argument:
  *  - Page readiness. `white=0.966` from the first sample and steady for
@@ -30,15 +65,10 @@
  *    before every launch, `ls /root` confirms only .bashrc/.profile
  *    remain each time, and iterations 2+ STILL work.
  *
- * So the warming factor is in-memory, not on disk. The two live
- * candidates are (a) lazily-initialised state inside the sidecar's X
- * server, which is the same process across iterations — the OSMesa/GLX
- * path is the obvious suspect since Firefox probes GLX at startup — and
- * (b) a startup-speed race: run 1 pays cold page-cache costs and starts
- * far slower (the one screencast-confirmed success had its window mapped
- * 1.85s after spawn). Next step is to log Firefox's spawn->window
- * duration per iteration and dump the sidecar log around the first vs
- * second launch, to tell those apart.
+ *  - A startup-speed race. `DIAG SPAWN->WINDOW` is 2.08s in a DEAF run
+ *    versus 1.85s in the screencast-confirmed working one, so run 1 is
+ *    not meaningfully slower and cold page cache is not the trigger.
+ *  - GLX / OSMesa lazy init: a glxgears pre-warm does not help.
  *
  * Incidental find, worth fixing separately: the per-test X reset kills
  * the parent firefox-esr but ORPHANS its children (Socket Process, RDD,
@@ -80,9 +110,64 @@ test("DIAG: firefox input with no timing assumptions", async ({
 		console.log(`DIAG PROFILE WIPE: ${out.replace(/\n/g, " | ")}`);
 	}
 
+	// DIAG_PREWARM=<cmd> runs another X client to completion-ish before
+	// Firefox, in an otherwise fresh container. This is the three-way
+	// discriminator for what "warms" the container:
+	//   glxgears  -> if this fixes run 1, the culprit is lazily
+	//                initialised GLX/OSMesa state in OUR X server, which
+	//                is the same process across iterations.
+	//   gtk3-demo -> if this fixes it but glxgears does not, it is the
+	//                GTK/GDK stack (page cache, or GDK-side init).
+	//   neither   -> it is specific to Firefox itself.
+	// A prior `xterm` is already known NOT to warm it, so a plain X
+	// client is not enough.
+	if (process.env.DIAG_PREWARM) {
+		const out = await sidecarContainer
+			.exec([
+				"sh",
+				"-c",
+				`DISPLAY=:99 nohup ${process.env.DIAG_PREWARM} >/tmp/prewarm.log 2>&1 & sleep 10; echo "prewarm rc=$?"; head -5 /tmp/prewarm.log 2>&1`,
+			])
+			.then((r) => r.output);
+		console.log(
+			`DIAG PREWARM(${process.env.DIAG_PREWARM}): ${out.replace(/\n/g, " | ")}`,
+		);
+	}
+
+	// DIAG_PREWARM_XVFB=1 is THE discriminator for where the warming
+	// lives. It runs a GTK3 client against a throwaway Xvfb on :78, so
+	// every container-level side effect of "a GTK3 app has run here"
+	// happens — dbus activation, fontconfig caches, GTK module/immodule
+	// caches, shared libraries paged in — while OUR X server on :99
+	// never sees a GTK3 client at all.
+	//   Firefox then works  -> the warming is container/environment-level
+	//                          and our server is innocent.
+	//   Firefox still deaf  -> the warming is state inside our X server
+	//                          process (interned atoms, some lazily
+	//                          initialised per-first-GTK-client path),
+	//                          i.e. the bug is ours.
+	if (process.env.DIAG_PREWARM_XVFB) {
+		const out = await sidecarContainer
+			.exec([
+				"sh",
+				"-c",
+				"Xvfb :78 -screen 0 1024x768x24 >/tmp/xvfb.log 2>&1 & sleep 3; " +
+					"DISPLAY=:78 nohup gtk3-demo >/tmp/prewarm78.log 2>&1 & sleep 10; " +
+					'echo "xvfb-prewarm done"; DISPLAY=:78 xwininfo -root -children 2>&1 | head -6',
+			])
+			.then((r) => r.output);
+		console.log(`DIAG PREWARM_XVFB: ${out.replace(/\n/g, " | ")}`);
+	}
+
 	await page.goto(frontendUrl);
 	await waitForDock(page);
 
+	// Time the spawn. The competing hypothesis to server-side lazy init
+	// is a plain startup-speed race: run 1 pays cold page-cache costs.
+	// The one screencast-confirmed success had its window mapped 1.85s
+	// after the spawn click, so if run 1 is dramatically slower here that
+	// is evidence for the race.
+	const spawnStart = performance.now();
 	const frame = await spawnApp(
 		page,
 		"--no-remote --new-instance file:///opt/test-content/input-probe.html",
@@ -91,6 +176,9 @@ test("DIAG: firefox input with no timing assumptions", async ({
 	);
 	const canvas = frame.locator('[data-testid="x11-canvas"]');
 	await expect(canvas).toBeVisible({ timeout: 180_000 });
+	console.log(
+		`DIAG SPAWN->WINDOW: ${((performance.now() - spawnStart) / 1000).toFixed(2)}s`,
+	);
 
 	const sample = async (label: string) => {
 		const [w, b, m, g] = await Promise.all([
