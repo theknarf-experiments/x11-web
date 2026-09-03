@@ -9,6 +9,7 @@ use super::pixmap::{SharedGcs, SharedPixmaps};
 use super::region::RegionRect;
 use super::routing::{EventBroadcaster, SharedWindows};
 use crate::framebuffer::Framebuffer;
+use x11_web_protocol::DisplayUpdate;
 
 /// EWMH window type, used for stacking layer and focus/decoration policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -289,12 +290,31 @@ impl Drop for ClientRegistryGuard {
 /// If the connection task exits any other way (panic, write error, future
 /// drop), the guard sweeps the shared registries based on the last known
 /// close-down mode.
+///
+/// It also has to tell the *frontend* those windows are gone, which the
+/// original guard did not. `DisplayUpdate::WindowDestroyed` is the only signal
+/// that removes a window from the backend's `window_track`; nothing else does,
+/// because `ProcessExited` deliberately drops no windows (the sidecar reports a
+/// wrapper pid that may still identify a live descendant). So a connection that
+/// died on the error path left the backend — and therefore every frontend's
+/// window list and dock — holding a window that no longer exists, forever.
+///
+/// That path is not exotic. On AF_UNIX, killing a client that still has
+/// unread server→client bytes queued makes the server's next read fail with
+/// `ECONNRESET` rather than returning 0, so *any* `kill -9` of a busy app takes
+/// the guard path instead of the `n == 0` path.
 pub(crate) struct ClientResourcesCleanupGuard {
     pub(crate) shared_windows: SharedWindows,
     pub(crate) shared_pixmaps: SharedPixmaps,
     pub(crate) shared_gcs: SharedGcs,
     pub(crate) event_broadcaster: EventBroadcaster,
     pub(crate) client_id: String,
+    /// Shared xid → (uuid, client_id) index. The per-connection `x11_to_uuid`
+    /// map lives in `ClientState`, which the guard cannot reach from `Drop`;
+    /// this is the same mapping in a form it can.
+    pub(crate) window_index: crate::menus::WindowIndex,
+    /// Channel the frontend's window list is fed from.
+    pub(crate) update_tx: mpsc::UnboundedSender<super::routing::TaggedDisplayUpdate>,
     /// Last value of `state.close_down_mode` written by the request loop.
     /// 0 = Destroy (default), 1 = RetainPermanent, 2 = RetainTemporary.
     pub(crate) close_down_mode: Arc<AtomicU8>,
@@ -315,6 +335,15 @@ impl Drop for ClientResourcesCleanupGuard {
         // RetainPermanent/RetainTemporary leave them alive on purpose.
         if self.close_down_mode.load(Ordering::SeqCst) != 0 {
             return;
+        }
+        // Tell the frontend before dropping the registry entries. Taking from
+        // the index rather than reading it keeps this idempotent: a second
+        // guard drop (or a later `unregister`) finds nothing to re-announce.
+        for uuid in self.window_index.take_client_windows(&self.client_id) {
+            let _ = self.update_tx.send((
+                self.client_id.clone(),
+                DisplayUpdate::WindowDestroyed { window_id: uuid },
+            ));
         }
         if let Ok(mut shared) = self.shared_windows.lock() {
             let owned: Vec<u32> = shared

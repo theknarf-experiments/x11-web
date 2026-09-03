@@ -525,16 +525,20 @@ pub(crate) async fn handle_client(
         registry: client_registry,
         resource_id_base,
     };
-    // Fallback cleanup for the case where the request loop exits via a write
-    // error (broken pipe) instead of n==0. Without it, the explicit cleanup
-    // path is skipped and the client's windows leak into shared_windows
-    // forever, where the next-connecting client clones them.
+    // Fallback cleanup for the case where the request loop exits via an I/O
+    // error (broken pipe on write, ECONNRESET on read) instead of n==0.
+    // Without it, the explicit cleanup path is skipped: the client's windows
+    // leak into shared_windows forever, where the next-connecting client
+    // clones them, and — because WindowDestroyed is never emitted — they also
+    // stay in the backend's window list and in every frontend's dock.
     let _resources_guard = ClientResourcesCleanupGuard {
         shared_windows: state.shared_windows.clone(),
         shared_pixmaps: state.shared_pixmaps.clone(),
         shared_gcs: state.shared_gcs.clone(),
         event_broadcaster: state.event_broadcaster.clone(),
         client_id: client_id.clone(),
+        window_index: state.menu.tracker.window_index().clone(),
+        update_tx: state.update_tx.clone(),
         close_down_mode: state.close_down_mode_atomic.clone(),
         cleanup_done: state.disconnect_cleanup_done.clone(),
     };
@@ -850,6 +854,12 @@ pub(crate) async fn handle_client(
                                         },
                                     ));
                                 }
+                                // Drop the shared xid → uuid entry too. This
+                                // path never did, so the index grew for the
+                                // life of the server; it is also what stops
+                                // the cleanup guard from re-announcing these
+                                // same windows if it runs after us.
+                                state.menu.tracker.window_index().unregister(wid);
                                 // Same unlink in our own local view, in case
                                 // anything below reads from state.windows
                                 // before the per-client teardown wipes it.

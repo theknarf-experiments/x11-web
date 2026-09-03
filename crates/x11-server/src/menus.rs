@@ -66,6 +66,25 @@ impl WindowIndex {
         map.remove(&xid);
     }
 
+    /// Remove and return every window UUID owned by `client_id`.
+    ///
+    /// Used by `ClientResourcesCleanupGuard` on the abrupt-disconnect path,
+    /// where the per-connection `x11_to_uuid` map is already out of reach but
+    /// the frontend still has to be told the windows are gone. This index is
+    /// the only *shared* xid → uuid mapping in the server, which is exactly
+    /// why the guard can consult it from `Drop`.
+    pub fn take_client_windows(&self, client_id: &str) -> Vec<String> {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mine: Vec<u32> = map
+            .iter()
+            .filter(|(_, e)| e.client_id == client_id)
+            .map(|(&xid, _)| xid)
+            .collect();
+        mine.into_iter()
+            .filter_map(|xid| map.remove(&xid).map(|e| e.uuid))
+            .collect()
+    }
+
     /// Look up the window UUID and X11 client id for a raw xid.
     pub fn lookup(&self, xid: u32) -> Option<(String, String)> {
         let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -1239,4 +1258,34 @@ async fn dispatch_dbusmenu_activation(
     let dummy_data = Value::I32(0);
     proxy.event(id, "clicked", &dummy_data, timestamp).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod window_index_tests {
+    use super::WindowIndex;
+
+    /// `take_client_windows` is what the abrupt-disconnect cleanup guard uses
+    /// to work out which `WindowDestroyed` updates to emit, so it has to be
+    /// (a) scoped to one client and (b) draining — a second call must return
+    /// nothing, or a re-run of the guard would re-announce dead windows.
+    #[test]
+    fn take_client_windows_is_scoped_and_draining() {
+        let idx = WindowIndex::new();
+        idx.register(0x100, "uuid-a".into(), "client-1".into());
+        idx.register(0x200, "uuid-b".into(), "client-1".into());
+        idx.register(0x300, "uuid-c".into(), "client-2".into());
+
+        let mut mine = idx.take_client_windows("client-1");
+        mine.sort();
+        assert_eq!(mine, vec!["uuid-a".to_string(), "uuid-b".to_string()]);
+
+        // Drained: the guard can run twice without double-announcing.
+        assert!(idx.take_client_windows("client-1").is_empty());
+        // The other client is untouched.
+        assert_eq!(
+            idx.lookup(0x300),
+            Some(("uuid-c".into(), "client-2".into()))
+        );
+        assert_eq!(idx.lookup(0x100), None);
+    }
 }
