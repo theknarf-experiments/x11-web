@@ -1,79 +1,71 @@
 /**
- * REPRODUCER for the long-standing "Firefox is deaf to input" bug
- * (`x11-web.spec.ts:832`, which carries `test.fail`). Opt-in, because it
- * is a diagnostic with no assertions — it prints a colour timeline:
+ * REPRODUCER + instruments for the GLX input bug.
  *
- *     X11WEB_FIREFOX_DIAG=1 pnpm --filter x11-web-e2e exec playwright test \
- *       --workers=1 --repeat-each=4 tests/firefox-input-diag.spec.ts
+ *     X11WEB_FIREFOX_DIAG=1 [X11WEB_ENABLE_GLX=1] [DIAG_XTRACE=1] \
+ *       pnpm --filter x11-web-e2e exec playwright test --workers=1 \
+ *       tests/firefox-input-diag.spec.ts
  *
- * THE FINDING: only the FIRST GTK3 client in a fresh container is deaf.
- * Every later one works instantly. This is NOT Firefox-specific, and it
- * is 100% consistent across repeats, which replaces the old belief that
- * this was an unreproducible intermittency.
+ * THE BUG: when the server advertises GLX, the GTK3 client that performs
+ * GDK's GLX-based visual probe becomes unable to dispatch input — no hover,
+ * no click, no keys, forever. GDK caches that probe's result in a
+ * `GDK_VISUALS` property on the root window, so every LATER GTK3 client on
+ * the same display skips the probe and works fine. That is why it looks like
+ * "only the first client is deaf", and why any prior GTK3 client "warms" the
+ * display. Firefox is just the app people notice.
  *
- * Iteration 1: hover/click/key all 0.000 for 25-55s.
- * Iterations 2+: `HOVER WORKED after ~0s`, then click and key.
+ * GLX is therefore off by default (crates/x11-server/src/xserver/mod.rs);
+ * X11WEB_ENABLE_GLX=1 turns it on and reproduces this.
  *
- * The SHORTEST reproducer is not this file — it is the existing
- * gtk3-demo probe, ~2 minutes, no Firefox involved:
+ * A SHORTER REPRODUCER, ~2 min, no Firefox:
+ *     X11_INPUT_DEBUG=1 X11WEB_ENABLE_GLX=1 pnpm --filter x11-web-e2e exec \
+ *       playwright test --workers=1 --repeat-each=2 -g "gtk3-demo reacts to hover"
+ *     run 1: HOVER changed=false   run 2: HOVER changed=true
  *
- *     X11_INPUT_DEBUG=1 pnpm --filter x11-web-e2e exec playwright test \
- *       --workers=1 --repeat-each=2 -g "gtk3-demo reacts to hover"
- *     run 1: GTK3 HOVER changed=false   GTK3 PRESS changed=false
- *     run 2: GTK3 HOVER changed=true    GTK3 PRESS changed=true
+ * THE KEY ASSET: the same Firefox, in the same container, on the same
+ * Mesa/llvmpipe stack, WORKS against Xvfb on :78 — its probe page goes blue
+ * on hover — and is deaf against ours on :99. Start Xvfb inside the sidecar
+ * container and you have a known-good and known-bad server side by side.
  *
- * That also explains why the earlier investigation concluded "GTK3 input
- * is FIXED, Firefox is specially broken": gtkprobe was never the first
- * GTK3 client in its container. The conclusion was a test-ordering
- * artifact. Note the gtk3-demo probe runs with GDK_CORE_DEVICE_EVENTS=1,
- * i.e. XI2 bypassed client-side, and is STILL deaf when first — so this
- * is not simply an XI2 story either.
+ * WHAT THE TRACES SHOW (DIAG_XTRACE=1 dumps a profile of everything the
+ * server sends, plus the delivered input events):
+ *  - We DELIVER correctly. A deaf Firefox still receives 2 EnterNotify,
+ *    1 LeaveNotify and 13 MotionNotify, with counts and target windows
+ *    byte-identical to the working GLX-off run. The client drops them.
+ *  - The deaf run does uniformly LESS startup work: QueryPointer 0 vs 6,
+ *    GetWindowAttributes 3 vs 6, ConfigureNotify 6 vs 12, MapNotify 2 vs 4,
+ *    no UnmapNotify at all. It is bailing out of an init path, not being
+ *    starved of events. Xvfb answers 5 QueryPointer in its working run.
+ *  - Firefox only QUERIES GLX (QueryServerString, QueryVersion,
+ *    GetFBConfigs, GetVisualConfigs, ClientInfo). It never creates a
+ *    context and gets no protocol errors.
  *
- * WHAT WARMS IT (DIAG_PREWARM=<cmd>, run in an otherwise fresh container
- * before Firefox):
- *     none       -> deaf
- *     xterm      -> deaf     (a plain core-events client is not enough)
- *     glxgears   -> deaf     (it does reach our GLX: glXCreateContext failed)
- *     gtk3-demo  -> WORKS    (any GTK3 client warms it)
- *
- * AND THE DECISIVE ONE — DIAG_PREWARM_XVFB=1 runs gtk3-demo against a
- * throwaway Xvfb on :78, so every container-level side effect of "a GTK3
- * app has run here" happens (dbus activation, fontconfig, GTK caches,
- * libraries paged in) while our server on :99 never sees a GTK3 client.
- * Result: STILL DEAF. So the warming is not environmental — it is state
- * inside OUR X SERVER PROCESS, created when the first GTK3 client
- * connects to it. The bug is ours.
- *
- * NEXT STEP: xtrace the first and second GTK3 client against :99 and
- * diff them. The difference in what the server answers — most likely an
- * atom, a property, or a device/extension query that only resolves once
- * some other client has interned or created it — should name the bug.
- *
- * RULED OUT, each by measurement rather than argument:
- *  - Page readiness. `white=0.966` from the first sample and steady for
- *    55s while blue stays 0.000, so the probe page is fully rendered and
- *    simply deaf. (The white gate IS still too weak to distinguish the
- *    probe page from Firefox's blank page — both #ffffff — but that is
- *    not what is happening here.)
- *  - Anything motion-specific: click and key are equally dead.
+ * RULED OUT BY EXPERIMENT — do not re-run these:
+ *  - Page readiness: white=0.966 from the first sample, steady 55s, blue 0.
+ *  - Motion-specific: click and key are equally dead.
  *  - The GTK a11y bridge: NO_AT_BRIDGE=1 is already set image-wide.
- *  - The X window tree and focus: dumps from a deaf and a working run
- *    are structurally identical — same 921x691 Navigator, same four
- *    200x200 windows, focus on the same 1x1 child in both.
- *  - The Firefox profile, and in fact the whole home directory:
- *    DIAG_WIPE_PROFILE=1 deletes ~/.mozilla, ~/.cache and ~/Downloads
- *    before every launch, `ls /root` confirms only .bashrc/.profile
- *    remain each time, and iterations 2+ STILL work.
+ *  - Window tree, visual, depth, colormap, and selected event masks: all
+ *    identical between the working and broken runs.
+ *  - The Firefox profile and the entire home dir (DIAG_WIPE_PROFILE=1).
+ *  - A startup-speed race: spawn->window 2.08s deaf vs 1.85s working.
+ *  - The advertised GLX extension list (3 -> 22 did not help; it also broke
+ *    a glx.spec.ts assertion).
+ *  - The config replies: zero visual configs + zero FBConfigs did not help.
+ *  - Direct rendering: generating the full FBConfig permutation set DID flip
+ *    `direct rendering` No -> Yes, matching Xvfb. Firefox stayed deaf and
+ *    glxgears began segfaulting, so it was reverted.
+ *  - Firefox's GL compositor: MOZ_ACCELERATED=0 MOZ_WEBRENDER=0 stays deaf,
+ *    and gtk3-demo has no WebRender yet is affected identically.
+ *  - The target_wid vs deepest-window mismatch in the browser input path: it
+ *    is present in the working run too.
  *
- *  - A startup-speed race. `DIAG SPAWN->WINDOW` is 2.08s in a DEAF run
- *    versus 1.85s in the screencast-confirmed working one, so run 1 is
- *    not meaningfully slower and cold page cache is not the trigger.
- *  - GLX / OSMesa lazy init: a glxgears pre-warm does not help.
+ * NEXT: diff the full :78 and :99 traces around window mapping and the
+ * property/focus traffic, not just the input events — that is where the
+ * "does less startup work" divergence begins. The one field-level difference
+ * found that way so far was the crossing `focus` flag, fixed in 6a9a87a.
  *
- * Incidental find, worth fixing separately: the per-test X reset kills
- * the parent firefox-esr but ORPHANS its children (Socket Process, RDD,
- * WebExtensions, Web Content x3, crashhelper), which survive reparented
- * to pid 1.
+ * Incidental, worth fixing separately: the per-test X reset kills the parent
+ * firefox-esr but ORPHANS its children (Socket Process, RDD, WebExtensions,
+ * Web Content x3, crashhelper), reparented to pid 1.
  */
 import { colorFraction, expect, spawnApp, test, waitForDock } from "./fixtures";
 
@@ -176,7 +168,10 @@ test("DIAG: firefox input with no timing assumptions", async ({
 	const frame = process.env.DIAG_XTRACE
 		? await spawnApp(
 				page,
-				"-n -o /tmp/ff-trace.log firefox-esr --no-remote --new-instance file:///opt/test-content/input-probe.html",
+				`-n -o /tmp/ff-trace.log ${process.env.DIAG_FF_ENV ?? ""} firefox-esr --no-remote --new-instance file:///opt/test-content/input-probe.html`.replace(
+					/\s+/g,
+					" ",
+				),
 				"xtrace",
 				180_000,
 			)
@@ -298,8 +293,8 @@ test("DIAG: firefox input with no timing assumptions", async ({
 				'grep -oE "Event (MotionNotify|ButtonPress|ButtonRelease|KeyPress|KeyRelease|EnterNotify|LeaveNotify)" /tmp/ff-trace.log | sort | uniq -c; ' +
 					'echo "--- which windows are the crossings/motion addressed to:"; ' +
 					'grep -E "Event (MotionNotify|EnterNotify|LeaveNotify|ButtonPress)" /tmp/ff-trace.log | grep -oE "event=0x[0-9a-f]+" | sort | uniq -c; ' +
-					'echo "--- the actual crossing/motion event fields:"; ' +
-					'grep -E "Event (EnterNotify|LeaveNotify|MotionNotify)" /tmp/ff-trace.log | cut -c1-190 | head -8',
+					'echo "--- profile of everything the server sends:"; ' +
+					'sed -E "s/0x[0-9a-f]+/H/g; s/=[0-9]+/=N/g" /tmp/ff-trace.log | grep -oE "^[0-9]+:>:[^ ]* (Event [A-Za-z]+|Reply to [A-Za-z]+|Error [A-Za-z]+)" | sed -E "s/^[0-9]+:>:[^ ]* //" | sort | uniq -c | sort -rn | head -32',
 			])
 			.then((r) => r.output);
 		console.log(`DIAG DELIVERED:\n${counts}`);
