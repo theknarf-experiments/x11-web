@@ -327,6 +327,40 @@ async fn main() {
     let dbus_address = dbus_session.as_ref().map(|s| s.address.clone());
 
     // Start X11 server
+    // Deliberately unbounded, and not straightforwardly fixable here.
+    //
+    // The Wayland sidecar bounds its equivalent with a per-window frame
+    // credit that simply skips a frame when the window is over budget.
+    // That is safe there because every Wayland frame is a full window
+    // composite, so a skipped one loses nothing. It is NOT safe here:
+    // X11 `PutImage` carries a damage RECTANGLE (emitted by
+    // `crates/x11-server/src/xserver/client/sync_flush.rs`) which the
+    // frontend blits onto a persistent canvas with no clear
+    // (`frontend/src/ClientRenderer.ts`). Every update is incremental,
+    // so dropping one corrupts the window permanently.
+    //
+    // Coalescing in the sidecar does not work either: merging pending
+    // rects into their union needs the pixels *between* them, and the
+    // sidecar only ever sees the rects — the framebuffer they were read
+    // from lives in the X server. Compositing the union from rects alone
+    // would paint stale data into the gaps.
+    //
+    // So a real fix belongs in `x11-server`, which does own the
+    // framebuffer. Two shapes work:
+    //   1. Accumulate damage per window and re-read the union region
+    //      from the framebuffer at emit time — the conventional
+    //      damage-accumulation design, and the better one.
+    //   2. Bound this channel with `try_send`, and on rejection mark the
+    //      window as needing a full repaint, so the next emit sends the
+    //      whole window from the framebuffer. Dropping is only safe when
+    //      a full refresh is guaranteed to follow.
+    // What is NOT an option is a bounded channel with a blocking send:
+    // the sender is the X server's own client loop, so backpressure
+    // there stalls the X protocol for every client.
+    //
+    // Left as-is until it is shown to matter. The encode no longer
+    // blocks the events loop (see `display_loop` below), which removed
+    // the mechanism that made this queue grow fastest.
     let (display_tx, mut display_rx) = mpsc::unbounded_channel::<TaggedDisplayUpdate>();
     let (client_connected_tx, mut client_connected_rx) = mpsc::unbounded_channel::<(String, u32)>();
     let window_router = WindowRouter::new();
