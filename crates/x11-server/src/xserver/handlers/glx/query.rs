@@ -1,8 +1,8 @@
 //! GLX query operations (QueryVersion, GetVisualConfigs, GetFBConfigs,
 //! QueryExtensionsString, QueryServerString).
 
-use super::super::super::core::{ROOT_VISUAL, VISUAL_TRUE_COLOR_ARGB_32};
-use super::{FBCONFIG_ARGB, FBCONFIG_RGB};
+use super::super::super::core::ROOT_VISUAL;
+use super::FBCONFIG_RGB;
 use super::{
     FBCONFIG_ATTRIB_COUNT, GLX_ACCUM_ALPHA_SIZE, GLX_ACCUM_BLUE_SIZE, GLX_ACCUM_GREEN_SIZE,
     GLX_ACCUM_RED_SIZE, GLX_ALPHA_SIZE, GLX_AUX_BUFFERS, GLX_BLUE_SIZE, GLX_BUFFER_SIZE,
@@ -118,51 +118,34 @@ pub(crate) fn handle_get_fb_configs(_data: &[u8], seq: u16) -> Vec<u8> {
         (GLX_MAX_PBUFFER_PIXELS, 4096 * 4096),
     ];
 
-    // FBConfig 2: 32-bit ARGB
-    let config2: [(u32, u32); FBCONFIG_ATTRIB_COUNT] = [
-        (GLX_FBCONFIG_ID, FBCONFIG_ARGB),
-        (GLX_VISUAL_ID, VISUAL_TRUE_COLOR_ARGB_32),
-        (GLX_X_RENDERABLE, 1),
-        (GLX_RENDER_TYPE, GLX_RGBA_BIT),
-        (
-            GLX_DRAWABLE_TYPE,
-            GLX_WINDOW_BIT | GLX_PIXMAP_BIT | GLX_PBUFFER_BIT,
-        ),
-        (GLX_X_VISUAL_TYPE, GLX_TRUE_COLOR),
-        (GLX_CONFIG_CAVEAT, GLX_NONE),
-        (GLX_RED_SIZE, 8),
-        (GLX_GREEN_SIZE, 8),
-        (GLX_BLUE_SIZE, 8),
-        (GLX_ALPHA_SIZE, 8),
-        (GLX_BUFFER_SIZE, 32),
-        (GLX_DOUBLEBUFFER, 1),
-        (GLX_DEPTH_SIZE, 24),
-        (GLX_STENCIL_SIZE, 8),
-        (GLX_LEVEL, 0),
-        (GLX_AUX_BUFFERS, 0),
-        (GLX_STEREO, 0),
-        (GLX_ACCUM_RED_SIZE, 0),
-        (GLX_ACCUM_GREEN_SIZE, 0),
-        (GLX_ACCUM_BLUE_SIZE, 0),
-        (GLX_ACCUM_ALPHA_SIZE, 0),
-        (GLX_SAMPLE_BUFFERS, 0),
-        (GLX_SAMPLES, 0),
-        (GLX_TRANSPARENT_TYPE, GLX_NONE),
-        (GLX_MAX_PBUFFER_WIDTH, 4096),
-        (GLX_MAX_PBUFFER_HEIGHT, 4096),
-        (GLX_MAX_PBUFFER_PIXELS, 4096 * 4096),
-    ];
-
+    // There is deliberately NO second, 32-bit ARGB FBConfig here, even though
+    // we do expose a depth-32 TrueColor visual in the core visual list.
+    //
+    // GDK4 prefers an alpha-capable config: given one, it picks that config's
+    // visual for its toplevels, so every GTK4 window comes up depth 32 rather
+    // than depth 24. Our presentation path is 24-bit — a depth-32 toplevel is
+    // created and mapped correctly on the X side (xwininfo shows it IsViewable
+    // and it appears in _NET_CLIENT_LIST) but never reaches the frontend, so
+    // the app renders no window frame at all. Measured: with the ARGB config
+    // advertised, gnome-calculator's toplevel is `Depth: 32  Visual: 0x40` and
+    // the three GTK4 e2e tests fail; without it the same toplevel is
+    // `Depth: 24  Visual: 0x21` and they pass.
+    //
+    // So this is the same rule as GLX's event base: do not advertise a
+    // capability we cannot honour. When the presentation path learns to
+    // composite ARGB toplevels, add the config back — the attribute list it
+    // needs is config1 with GLX_ALPHA_SIZE 8, GLX_BUFFER_SIZE 32,
+    // GLX_FBCONFIG_ID FBCONFIG_ARGB and GLX_VISUAL_ID
+    // VISUAL_TRUE_COLOR_ARGB_32.
     let property_list: Vec<u32> = config1
         .iter()
-        .chain(config2.iter())
         .flat_map(|&(k, v)| [k, v])
         .collect();
 
     serialize_var_reply(
         &GetFBConfigsReply {
             sequence: seq,
-            num_fb_configs: 2,
+            num_fb_configs: 1,
             num_properties: num_attribs,
             property_list,
         },
