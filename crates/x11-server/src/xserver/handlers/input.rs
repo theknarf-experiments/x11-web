@@ -235,6 +235,13 @@ pub(crate) fn handle_translate_coordinates(
 
 pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequest) -> Vec<u8> {
     let seq = state.sequence;
+    // The pointer is logically server-wide, but `state.pointer_x/y` is a
+    // per-connection cache. Both the conditional src-rectangle check and the
+    // relative (dst_window == 0) branch below read it, so without this pull a
+    // warp would test the wrong rectangle / offset from a stale origin
+    // whenever another client (XTEST FakeInput, another connection's warp)
+    // moved the pointer last. Same reasoning as `handle_query_pointer`.
+    state.refresh_pointer_from_shared();
     let src_window = req.src_window;
     let dst_window = req.dst_window;
     let src_x = req.src_x;
