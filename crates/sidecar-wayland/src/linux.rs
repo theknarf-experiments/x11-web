@@ -402,6 +402,30 @@ async fn run_session(
                         warn!("wire write failed: {e}");
                         return;
                     }
+                    // Return the window's frame credit here — after the
+                    // frame is actually on the wire — rather than in
+                    // `display_loop` when it was merely queued for us.
+                    //
+                    // Returning it at queue time bounded the ENCODER but
+                    // not the LINK: `tx` is unbounded, so a stalled QUIC
+                    // connection let the compositor keep producing and
+                    // the queue keep growing, which is the exact failure
+                    // the credit scheme exists to prevent.
+                    //
+                    // Bounding `tx` instead would deadlock: `handle_command`
+                    // sends into it from inside this same loop, and this
+                    // loop is the only drainer of `rx`, so a full channel
+                    // would block on itself. Moving the credit return is
+                    // strictly more throttling and cannot deadlock — the
+                    // credit only gates the compositor thread's render
+                    // tick, which never waits on this task.
+                    if let SidecarToBackend::DisplayUpdate {
+                        update: DisplayUpdate::PutImage { window_id, .. },
+                        ..
+                    } = &msg
+                    {
+                        window_router.frame_shipped(window_id);
+                    }
                 }
                 Some((client_id, peer_pid)) = client_connected_rx.recv() => {
                     // Identical to the X11 sidecar, and it works for
@@ -482,17 +506,15 @@ async fn run_session(
                 m.display_updates
                     .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
             }
+            // The credit for this frame is NOT returned here. The writer
+            // arm in `events_loop` returns it once the frame is actually
+            // on the wire, so "in flight" tracks the link rather than
+            // just the encoder — see the comment there.
             if tx_display
                 .send(SidecarToBackend::DisplayUpdate { client_id, update })
                 .is_err()
             {
                 return;
-            }
-            // Hand the window's credit back only once the frame is
-            // queued for the writer, so the compositor's notion of
-            // "in flight" tracks the encoder rather than the wire.
-            if let Some(window_id) = window_id {
-                window_router.frame_shipped(&window_id);
             }
         }
     };
