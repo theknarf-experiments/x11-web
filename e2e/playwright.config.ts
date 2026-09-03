@@ -32,13 +32,20 @@ export default defineConfig({
 	retries: 0,
 	workers: WORKERS,
 	// Parallelise tests *within* a file across worker slots, not just
-	// across files. Each `fixtures.ts` worker has its own container
-	// trio, so parallelism gives every test a clean sidecar. Without
-	// this, single-file runs serialise through one sidecar and
-	// processes / X state leak between tests (xeyes left running,
-	// stale focus, atoms accumulated). The previous `workers > 1`
-	// behaviour relied on Playwright respawning workers on failures,
-	// which accidentally provided that clean-slate effect.
+	// across files, so a single 200-test file still uses both slots.
+	//
+	// This does NOT hand each test a clean sidecar — an earlier version
+	// of this comment claimed it did, and that misconception is what
+	// made the suite's flakiness so hard to read. `sidecarContainer` is
+	// worker-scoped, so ONE X server serves every test a slot ever runs
+	// (~160 of them here). Worker respawn does not reset it either:
+	// `ensureSetup()` re-enters `.withReuse()` and re-attaches to the
+	// same running container, X clients, pointer, focus and all.
+	//
+	// What actually gives each test a clean slate is the auto
+	// `x11Clean` fixture in `fixtures.ts`, which resets the worker's X
+	// server at teardown. Parallelism only randomises the order tests
+	// land in; it never cleaned anything up.
 	fullyParallel: true,
 	globalSetup: "./global-setup.ts",
 	globalTeardown: "./global-teardown.ts",

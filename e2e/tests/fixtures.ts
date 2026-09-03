@@ -51,6 +51,12 @@ const SCRIPTS_DIR = path.join(E2E_DIR, "scripts");
 const WORKER_INDEX = process.env.TEST_PARALLEL_INDEX ?? "0";
 const WORKER_NETWORK = `x11web-worker-${WORKER_INDEX}`;
 
+// Image tags produced by `global-setup.ts`, which is the ONLY place they are
+// built. Workers must never build them: see `buildImage` there for why
+// (silently-stale images and two workers racing on one tag).
+const BACKEND_IMAGE = "x11-web-backend-test";
+const SIDECAR_IMAGE = "x11-web-sidecar-test";
+
 let backendContainer: StartedTestContainer;
 let sidecarContainer: StartedTestContainer;
 let mockOidcContainer: StartedTestContainer;
@@ -125,90 +131,87 @@ async function doSetup() {
 		`[worker ${WORKER_INDEX}] Mock OIDC running at http://localhost:${mockOidcPort}`,
 	);
 
-	backendContainer = await GenericContainer.fromDockerfile(
-		PROJECT_ROOT,
-		"Dockerfile.backend",
-	)
-		.build("x11-web-backend-test", { deleteOnExit: false })
-		.then((image) => {
-			const built = image
-				.withNetworkMode(WORKER_NETWORK)
-				.withNetworkAliases("backend")
-				.withExposedPorts({ container: 3001, host: backendPort })
-				// `localhost` inside the backend container resolves
-				// to the host gateway, so the backend hits the
-				// host-published mock-oidc port at the *same* URL
-				// the browser uses. That keeps the OIDC issuer
-				// string identical on both sides — required for the
-				// `iss` claim check on the ID token.
-				.withExtraHosts([{ host: "localhost", ipAddress: "host-gateway" }])
-				// Mount the prebuilt frontend (produced by
-				// `global-setup.ts`) into the backend container so
-				// the backend's `ServeDir` fallback serves the SPA.
-				// Means the browser hits one origin
-				// (`localhost:<backendPort>`) for the SPA, the auth
-				// routes, and the WS — cookies trivially same-origin.
-				.withBindMounts([
-					{
-						source: path.join(FRONTEND_DIR, "dist"),
-						target: FRONTEND_DIST_IN_CONTAINER,
-						mode: "ro",
-					},
-				])
-				.withEnvironment({
-					// Pin the fingerprint to a fixed path so the harness
-					// can `exec cat` it without depending on a $HOME that
-					// the backend's slim image doesn't actually set.
-					X11WEB_FINGERPRINT_FILE: FINGERPRINT_PATH,
-					// Bind the WebRTC UDP socket to a known port inside
-					// the container. The same port is published 1:1 to
-					// the host below so `127.0.0.1:<port>` reaches it.
-					X11WEB_RTC_BIND_ADDR: `0.0.0.0:${rtcUdpPort}`,
-					// What the backend tells the browser to dial. The
-					// browser runs on the host, so it sees container
-					// services through the host loopback.
-					X11WEB_RTC_PUBLIC_HOST: "127.0.0.1",
-					// Tells the backend to serve the SPA at `/`. The
-					// path is the bind-mount target above.
-					X11WEB_FRONTEND_DIR: FRONTEND_DIST_IN_CONTAINER,
-					// OIDC against the mock provider. `localhost` here
-					// resolves through the host-gateway entry above.
-					OIDC_ISSUER: `http://localhost:${mockOidcPort}/x11-web`,
-					OIDC_CLIENT_ID: "x11-web",
-					OIDC_REDIRECT_URI: `http://localhost:${backendPort}/auth/callback`,
-					OIDC_POST_LOGIN_REDIRECT: `http://localhost:${backendPort}/`,
-				})
-				.withWaitStrategy(Wait.forHttp("/health", 3001).forStatusCode(200))
-				// Reuse on worker respawn — keyed by image+env+network, all
-				// stable per worker — so we re-attach instead of leaking.
-				.withReuse();
+	// The images are built once by `global-setup.ts`, before any worker
+	// exists — see the comment on `buildImage` there. Workers only start them.
+	const backendSpec = new GenericContainer(BACKEND_IMAGE)
+		.withNetworkMode(WORKER_NETWORK)
+		.withNetworkAliases("backend")
+		.withExposedPorts({ container: 3001, host: backendPort })
+		// `localhost` inside the backend container resolves
+		// to the host gateway, so the backend hits the
+		// host-published mock-oidc port at the *same* URL
+		// the browser uses. That keeps the OIDC issuer
+		// string identical on both sides — required for the
+		// `iss` claim check on the ID token.
+		.withExtraHosts([{ host: "localhost", ipAddress: "host-gateway" }])
+		// Mount the prebuilt frontend (produced by
+		// `global-setup.ts`) into the backend container so
+		// the backend's `ServeDir` fallback serves the SPA.
+		// Means the browser hits one origin
+		// (`localhost:<backendPort>`) for the SPA, the auth
+		// routes, and the WS — cookies trivially same-origin.
+		.withBindMounts([
+			{
+				source: path.join(FRONTEND_DIR, "dist"),
+				target: FRONTEND_DIST_IN_CONTAINER,
+				mode: "ro",
+			},
+		])
+		.withEnvironment({
+			// Pin the fingerprint to a fixed path so the harness
+			// can `exec cat` it without depending on a $HOME that
+			// the backend's slim image doesn't actually set.
+			X11WEB_FINGERPRINT_FILE: FINGERPRINT_PATH,
+			// Bind the WebRTC UDP socket to a known port inside
+			// the container. The same port is published 1:1 to
+			// the host below so `127.0.0.1:<port>` reaches it.
+			X11WEB_RTC_BIND_ADDR: `0.0.0.0:${rtcUdpPort}`,
+			// What the backend tells the browser to dial. The
+			// browser runs on the host, so it sees container
+			// services through the host loopback.
+			X11WEB_RTC_PUBLIC_HOST: "127.0.0.1",
+			// Tells the backend to serve the SPA at `/`. The
+			// path is the bind-mount target above.
+			X11WEB_FRONTEND_DIR: FRONTEND_DIST_IN_CONTAINER,
+			// OIDC against the mock provider. `localhost` here
+			// resolves through the host-gateway entry above.
+			OIDC_ISSUER: `http://localhost:${mockOidcPort}/x11-web`,
+			OIDC_CLIENT_ID: "x11-web",
+			OIDC_REDIRECT_URI: `http://localhost:${backendPort}/auth/callback`,
+			OIDC_POST_LOGIN_REDIRECT: `http://localhost:${backendPort}/`,
+		})
+		.withWaitStrategy(Wait.forHttp("/health", 3001).forStatusCode(200))
+		// Reuse on worker respawn — keyed by image+env+network, all
+		// stable per worker — so we re-attach instead of leaking.
+		.withReuse();
 
-			// testcontainers-node's `withExposedPorts` only handles TCP.
-			// Reach through the protected `hostConfig` to add the UDP
-			// port binding ourselves: the WebRTC DataChannel rides UDP,
-			// and without an explicit publish the browser on the host
-			// can't reach the container's UDP socket.
-			const hostConfig = (
-				built as unknown as { hostConfig: Record<string, unknown> }
-			).hostConfig;
-			const createOpts = (
-				built as unknown as {
-					createOpts: { ExposedPorts?: Record<string, object> };
-				}
-			).createOpts;
-			const portBindings = (hostConfig.PortBindings ?? {}) as Record<
-				string,
-				Array<{ HostPort: string }>
-			>;
-			portBindings[`${rtcUdpPort}/udp`] = [{ HostPort: String(rtcUdpPort) }];
-			hostConfig.PortBindings = portBindings;
-			createOpts.ExposedPorts = {
-				...(createOpts.ExposedPorts ?? {}),
-				[`${rtcUdpPort}/udp`]: {},
-			};
+	// testcontainers-node's `withExposedPorts` only handles TCP.
+	// Reach through the protected `hostConfig` to add the UDP
+	// port binding ourselves: the WebRTC DataChannel rides UDP,
+	// and without an explicit publish the browser on the host
+	// can't reach the container's UDP socket.
+	{
+		const hostConfig = (
+			backendSpec as unknown as { hostConfig: Record<string, unknown> }
+		).hostConfig;
+		const createOpts = (
+			backendSpec as unknown as {
+				createOpts: { ExposedPorts?: Record<string, object> };
+			}
+		).createOpts;
+		const portBindings = (hostConfig.PortBindings ?? {}) as Record<
+			string,
+			Array<{ HostPort: string }>
+		>;
+		portBindings[`${rtcUdpPort}/udp`] = [{ HostPort: String(rtcUdpPort) }];
+		hostConfig.PortBindings = portBindings;
+		createOpts.ExposedPorts = {
+			...(createOpts.ExposedPorts ?? {}),
+			[`${rtcUdpPort}/udp`]: {},
+		};
+	}
 
-			return built.start();
-		});
+	backendContainer = await backendSpec.start();
 
 	backendPort = backendContainer.getMappedPort(3001);
 	console.log(
@@ -226,55 +229,47 @@ async function doSetup() {
 	}
 	const fingerprint = fpResult.output.trim();
 
-	sidecarContainer = await GenericContainer.fromDockerfile(
-		PROJECT_ROOT,
-		"Dockerfile.sidecar",
-	)
-		.build("x11-web-sidecar-test", { deleteOnExit: false })
-		.then((image) =>
-			image
-				.withNetworkMode(WORKER_NETWORK)
-				.withNetworkAliases("sidecar")
-				.withHostname("x11web")
-				// Privileged mode lets apps that use Linux user-namespaces for
-				// sandboxing (browsers, etc.) work the same as on a normal desktop.
-				// This is a container environment requirement, not app-specific.
-				.withPrivilegedMode()
-				.withEnvironment({
-					// QUIC + Cap'n Proto wire (replaces the old WS+JSON
-					// path). Server-name must match the cert's SAN
-					// ("localhost") even when dialing the network alias.
-					BACKEND_QUIC_ADDR: "backend:3002",
-					BACKEND_SERVER_NAME: "localhost",
-					X11WEB_SERVER_FINGERPRINT: fingerprint,
-					SIDECAR_NAME: `test-sidecar-${WORKER_INDEX}`,
-					DISPLAY_NUMBER: "99",
-					// Set DISPLAY too — many tests run subprocess.run([...])
-					// inside python that doesn't propagate explicit env, so
-					// they pick up the container default.
-					DISPLAY: ":99",
-					RUST_LOG: process.env.SIDECAR_RUST_LOG ?? "info",
-					NO_AT_BRIDGE: "1",
-					// Pass through the extension kill switch so a test
-					// run can bisect app breakage per X extension, e.g.
-					// X11WEB_DISABLE_EXTENSIONS=XInputExtension pnpm
-					// exec playwright test …
-					X11WEB_DISABLE_EXTENSIONS:
-						process.env.X11WEB_DISABLE_EXTENSIONS ?? "",
-				})
-				// Use a shell-based readiness probe (X socket + backend WS
-				// still alive) instead of `Wait.forLogMessage`. Log-based
-				// waits search the container's stdout buffer, which on
-				// .withReuse() may have already scrolled past the target
-				// line — causing 60s timeouts on every worker respawn.
-				.withWaitStrategy(
-					Wait.forSuccessfulCommand(
-						"test -S /tmp/.X11-unix/X99 && pgrep -x x11-web-sidecar >/dev/null",
-					),
-				)
-				.withReuse()
-				.start(),
-		);
+	sidecarContainer = await new GenericContainer(SIDECAR_IMAGE)
+		.withNetworkMode(WORKER_NETWORK)
+		.withNetworkAliases("sidecar")
+		.withHostname("x11web")
+		// Privileged mode lets apps that use Linux user-namespaces for
+		// sandboxing (browsers, etc.) work the same as on a normal desktop.
+		// This is a container environment requirement, not app-specific.
+		.withPrivilegedMode()
+		.withEnvironment({
+			// QUIC + Cap'n Proto wire (replaces the old WS+JSON
+			// path). Server-name must match the cert's SAN
+			// ("localhost") even when dialing the network alias.
+			BACKEND_QUIC_ADDR: "backend:3002",
+			BACKEND_SERVER_NAME: "localhost",
+			X11WEB_SERVER_FINGERPRINT: fingerprint,
+			SIDECAR_NAME: `test-sidecar-${WORKER_INDEX}`,
+			DISPLAY_NUMBER: "99",
+			// Set DISPLAY too — many tests run subprocess.run([...])
+			// inside python that doesn't propagate explicit env, so
+			// they pick up the container default.
+			DISPLAY: ":99",
+			RUST_LOG: process.env.SIDECAR_RUST_LOG ?? "info",
+			NO_AT_BRIDGE: "1",
+			// Pass through the extension kill switch so a test
+			// run can bisect app breakage per X extension, e.g.
+			// X11WEB_DISABLE_EXTENSIONS=XInputExtension pnpm
+			// exec playwright test …
+			X11WEB_DISABLE_EXTENSIONS: process.env.X11WEB_DISABLE_EXTENSIONS ?? "",
+		})
+		// Use a shell-based readiness probe (X socket + backend WS
+		// still alive) instead of `Wait.forLogMessage`. Log-based
+		// waits search the container's stdout buffer, which on
+		// .withReuse() may have already scrolled past the target
+		// line — causing 60s timeouts on every worker respawn.
+		.withWaitStrategy(
+			Wait.forSuccessfulCommand(
+				"test -S /tmp/.X11-unix/X99 && pgrep -x x11-web-sidecar >/dev/null",
+			),
+		)
+		.withReuse()
+		.start();
 
 	console.log(
 		`[worker ${WORKER_INDEX}] SPA served by backend at http://localhost:${backendPort}`,
