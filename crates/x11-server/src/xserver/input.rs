@@ -503,6 +503,68 @@ fn emit_crossing(
     }
 }
 
+/// Build Leave/Enter crossing events for a **server-wide** pointer move,
+/// resolved against the SHARED window registry, and return them tagged with
+/// the window and mask they must be delivered to.
+///
+/// [`build_crossing_events`] cannot be used for this. It resolves ancestry
+/// and event masks through `state.windows`, which holds only the calling
+/// client's own windows — so for a cross-client pointer move (a warp from
+/// `xdotool`, say) `emit_crossing` finds nothing and silently emits an empty
+/// buffer. It also returns a flat byte blob with no indication of which
+/// window each event belongs to, which is unroutable, and the callers that
+/// re-chunk it at 32 bytes corrupt the variable-length XI2 events it appends.
+///
+/// This returns `(window, mask, bytes)` so the caller can hand each event to
+/// `deliver_event` and have it reach the client that actually owns the
+/// window. Detail is `Nonlinear`: the two windows belong to different clients
+/// and so are never in an ancestor relationship worth modelling here.
+pub(crate) fn build_shared_crossing_events(
+    state: &ClientState,
+    old_window: u32,
+    new_window: u32,
+    abs_x: i16,
+    abs_y: i16,
+) -> Vec<(u32, EventMask, Vec<u8>)> {
+    let mut out = Vec::new();
+    if old_window == new_window {
+        return out;
+    }
+    let Ok(shared) = state.shared_windows.lock() else {
+        return out;
+    };
+    let seq = state.sequence;
+    let bo = state.msb_first;
+    let timestamp = state.timestamp();
+    let root_window = state.root_window;
+    let focus_window = state.focus_window;
+
+    for (window, code, mask) in [
+        (old_window, LEAVE_NOTIFY_EVENT, EventMask::LEAVE_WINDOW),
+        (new_window, ENTER_NOTIFY_EVENT, EventMask::ENTER_WINDOW),
+    ] {
+        if window == 0 || !shared.contains_key(&window) {
+            continue;
+        }
+        let ev = make_crossing_event(
+            &shared,
+            code,
+            DETAIL_NONLINEAR,
+            CROSSING_MODE_NORMAL,
+            seq,
+            timestamp,
+            root_window,
+            window,
+            abs_x,
+            abs_y,
+            bo,
+            focus_window,
+        );
+        out.push((window, mask, ev));
+    }
+    out
+}
+
 pub(crate) fn build_crossing_events_with_mode(
     state: &mut ClientState,
     new_window: u32,

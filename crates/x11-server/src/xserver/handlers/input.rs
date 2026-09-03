@@ -371,11 +371,20 @@ pub(crate) fn handle_warp_pointer(state: &mut ClientState, req: &WarpPointerRequ
         u32::from(crate::xserver::core::EventMask::POINTER_MOTION),
     );
 
-    // Generate crossing events for the pointer move
-    let crossing =
-        super::super::input::build_crossing_events(state, new_window, new_x, new_y, new_x, new_y);
-    for chunk in crossing.chunks_exact(32) {
-        state.pending_events.push(chunk.to_vec());
+    // Generate crossing events for the pointer move.
+    //
+    // These must be resolved and routed through the SHARED registry for the
+    // same reason the motion event above is: `build_crossing_events` gates
+    // every event on `state.windows`, which holds only the warping client's
+    // own windows, so a cross-client warp emitted an empty buffer and nobody
+    // was ever told the pointer had entered their window. GTK3 will not act
+    // on a click until it has seen that Enter, which is why `xdotool
+    // mousemove` followed by `xdotool click` read as total input deafness.
+    let (old_window, _, _) = super::xtest::find_subwindow_in_shared(state, old_px, old_py, 0);
+    for (window, mask, ev) in super::super::input::build_shared_crossing_events(
+        state, old_window, new_window, new_x, new_y,
+    ) {
+        state.deliver_event(window, mask, &ev);
     }
 
     // Send MotionNotify event to let the client know the pointer moved
