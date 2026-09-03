@@ -255,7 +255,34 @@ impl ExtensionRegistry {
         // --- ext-glx ---------------------------------------------------------
         #[cfg(feature = "ext-glx")]
         {
-            add(&mut reg, Glx, "GLX", 159, 0, 159, handlers::glx::handle_glx_request);
+            // first_event = 66 is NOT optional even though we never send a GLX
+            // event. libGL registers the extension through libXext's
+            // `XextAddDisplay(..., __GLX_NUMBER_EVENTS, ...)`, and
+            // `__GLX_NUMBER_EVENTS` is 17 (GL/glxproto.h) regardless of how
+            // many events the server actually emits. XextAddDisplay then runs,
+            // unconditionally and with no bounds check:
+            //
+            //     for (i = 0; i < nevents; i++)
+            //         XESetWireToEvent(dpy, codes->first_event + i, ...);
+            //
+            // With first_event = 0 that installs `__glXWireToEvent` over Xlib's
+            // own dispatch slots 0..16 — KeyPress(2), KeyRelease(3),
+            // ButtonPress(4), ButtonRelease(5), MotionNotify(6), EnterNotify(7),
+            // LeaveNotify(8), FocusIn(9), FocusOut(10), KeymapNotify(11),
+            // Expose(12), GraphicsExpose(13), NoExpose(14),
+            // VisibilityNotify(15), CreateNotify(16). `__glXWireToEvent`
+            // returns False for anything that is not GLX_PbufferClobber or
+            // GLX_BufferSwapComplete, and Xlib silently DISCARDS an event whose
+            // wire_to_event hook returns False. So a client that so much as
+            // touches libGL — e.g. GDK's one-time GLX visual probe, cached
+            // afterwards in the GDK_VISUALS root property — goes permanently
+            // deaf to core input, crossing, focus and expose events, with the
+            // server's wire output still byte-perfect and no protocol error
+            // anywhere.
+            //
+            // 66..82 is the only free 17-wide window in our layout: SHAPE 64,
+            // MIT-SHM 65, then nothing until SYNC 83.
+            add(&mut reg, Glx, "GLX", 159, 66, 159, handlers::glx::handle_glx_request);
             // DRI3 is NOT registered: our server does not provide GPU/DRM
             // access, so advertising DRI3 causes Mesa to attempt (and fail)
             // hardware-accelerated DRI rendering before falling back.

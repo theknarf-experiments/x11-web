@@ -1522,27 +1522,114 @@ mod tests {
     // overlap with another extension's event range.
     // -----------------------------------------------------------------------
 
+    /// How many event codes each extension's CLIENT LIBRARY reserves.
+    ///
+    /// This is deliberately the client-side count, not the number of events we
+    /// actually emit. libXext's `XextAddDisplay` installs a wire_to_event hook
+    /// into `dpy->event_vec[first_event + i]` for `i` in `0..nevents`, where
+    /// `nevents` comes from the client library's own compiled-in constant. If
+    /// we report a `first_event` that leaves those slots overlapping another
+    /// extension's range — or worse, the core range 0..63 — the library
+    /// silently steals another owner's events and Xlib drops them, with no
+    /// protocol error and byte-perfect output still on the wire. That is
+    /// exactly the GLX bug: `__GLX_NUMBER_EVENTS` is 17, so a `first_event` of
+    /// 0 made libGL swallow KeyPress(2)..CreateNotify(16) forever.
+    ///
+    /// Every entry in the registry must appear here, so adding an extension
+    /// forces an explicit answer to "how many event slots does its client
+    /// library claim?".
+    const CLIENT_RESERVED_EVENT_COUNTS: &[(&str, u8)] = &[
+        // --- extensions that reserve event codes -------------------------
+        ("SHAPE", 1),            // ShapeNotify
+        ("MIT-SHM", 1),          // ShmCompletion
+        ("GLX", 17),             // __GLX_NUMBER_EVENTS (GL/glxproto.h)
+        ("SYNC", 1),             // AlarmNotify (XSyncNumberEvents)
+        ("XKEYBOARD", 1),        // XkbEventCode
+        ("XFIXES", 2),           // SelectionNotify + CursorNotify
+        ("RANDR", 2),            // ScreenChangeNotify + RRNotify
+        ("DAMAGE", 1),           // DamageNotify
+        ("MIT-SCREEN-SAVER", 1), // ScreenSaverNotify
+        ("SECURITY", 1),         // AuthorizationRevoked
+        ("XVideo", 2),           // VideoNotify + PortNotify
+        ("XInputExtension", 17), // IEVENTS (X11/extensions/XIproto.h)
+        // --- extensions that genuinely define no events ------------------
+        ("BIG-REQUESTS", 0),
+        ("XC-MISC", 0),
+        ("X-Resource", 0),
+        ("XTEST", 0),
+        ("RENDER", 0),
+        ("Composite", 0),
+        ("Present", 0),
+        ("DOUBLE-BUFFER", 0),
+        ("DPMS", 0),
+        ("XFree86-VidModeExtension", 0),
+        ("RECORD", 0),
+        ("XINERAMA", 0),
+        ("Generic Event Extension", 0),
+    ];
+
     #[test]
     fn extension_event_bases_no_overlap() {
-        // (first_event, num_events, name)
-        let events: &[(u8, u8, &str)] = &[
-            (64, 1, "SHAPE"),    // ShapeNotify
-            (65, 1, "MIT-SHM"),  // ShmCompletion
-            (83, 1, "SYNC"),     // AlarmNotify
-            (85, 1, "XKB"),      // XkbEventCode
-            (87, 2, "XFIXES"),   // SelectionNotify + CursorNotify
-            (89, 2, "RANDR"),    // ScreenChangeNotify + RRNotify
-            (91, 1, "DAMAGE"),   // DamageNotify
-            (93, 1, "SECURITY"), // AuthorizationRevoked
-            (95, 2, "XVideo"),   // VideoNotify + PortNotify
-        ];
-        for i in 0..events.len() {
-            let (base_a, count_a, name_a) = events[i];
-            for j in (i + 1)..events.len() {
-                let (base_b, count_b, name_b) = events[j];
-                let range_a = base_a..base_a + count_a;
-                let range_b = base_b..base_b + count_b;
-                let overlaps = range_a.start < range_b.end && range_b.start < range_a.end;
+        use crate::xserver::extensions::ExtensionRegistry;
+        let reg = ExtensionRegistry::new();
+
+        let mut ranges: Vec<(u8, u8, &str)> = Vec::new();
+        for ext in reg.enabled_extensions() {
+            let count = CLIENT_RESERVED_EVENT_COUNTS
+                .iter()
+                .find(|(name, _)| *name == ext.wire_name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Extension {:?} is in the registry but has no entry in \
+                         CLIENT_RESERVED_EVENT_COUNTS. Add one: how many event \
+                         codes does its client library reserve via XextAddDisplay?",
+                        ext.wire_name
+                    )
+                });
+            if count == 0 {
+                // An extension with no events must not claim a base — a stray
+                // base would be a lie clients could act on.
+                assert_eq!(
+                    ext.first_event, 0,
+                    "{} reserves no events but reports first_event={}",
+                    ext.wire_name, ext.first_event
+                );
+                continue;
+            }
+
+            // The crux of the GLX bug: an extension whose client library
+            // reserves N > 0 event slots MUST be given a real base above the
+            // 64 core event codes, or the library overwrites Xlib's own
+            // dispatch table for core events and the client goes deaf.
+            assert!(
+                ext.first_event >= 64,
+                "{} reserves {} client-side event slot(s) but reports \
+                 first_event={}. Slots {}..={} land in the core event range \
+                 (0..63) — the client library will overwrite Xlib's handlers \
+                 for those core events and silently drop them.",
+                ext.wire_name,
+                count,
+                ext.first_event,
+                ext.first_event,
+                ext.first_event as u16 + count as u16 - 1,
+            );
+            assert!(
+                ext.first_event as u16 + count as u16 - 1 <= 127,
+                "{} event range {}..={} runs past the last event code (127)",
+                ext.wire_name,
+                ext.first_event,
+                ext.first_event as u16 + count as u16 - 1,
+            );
+            ranges.push((ext.first_event, count, ext.wire_name));
+        }
+
+        for i in 0..ranges.len() {
+            let (base_a, count_a, name_a) = ranges[i];
+            for j in (i + 1)..ranges.len() {
+                let (base_b, count_b, name_b) = ranges[j];
+                let overlaps =
+                    base_a < base_b + count_b && base_b < base_a + count_a;
                 assert!(
                     !overlaps,
                     "Event range overlap: {} ({}-{}) and {} ({}-{})",
