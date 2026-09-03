@@ -1802,6 +1802,18 @@ pub(crate) async fn handle_client(
                             {
                                 let (deepest, local_x, local_y) =
                                     find_deepest_window(&state.windows, x11_wid, *x, *y);
+                                // Crossings are addressed to `deepest` but the
+                                // input event below is addressed to `x11_wid`.
+                                // When those disagree a toolkit is told the
+                                // pointer is in one window and handed a button
+                                // press for another, so log both.
+                                tracing::debug!(
+                                    target_wid = format!("{x11_wid:#x}"),
+                                    deepest = format!("{deepest:#x}"),
+                                    last_entered = format!("{:#x}", state.last_entered_window),
+                                    agree = deepest == x11_wid,
+                                    "browser input routing"
+                                );
                                 if deepest != state.last_entered_window {
                                     let (off_x, off_y) = state
                                         .windows

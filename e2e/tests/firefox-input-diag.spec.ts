@@ -167,13 +167,25 @@ test("DIAG: firefox input with no timing assumptions", async ({
 	// The one screencast-confirmed success had its window mapped 1.85s
 	// after the spawn click, so if run 1 is dramatically slower here that
 	// is evidence for the race.
+	// DIAG_XTRACE=1 runs Firefox under xtrace so we can count what the
+	// server actually DELIVERS to it. That is the delivery-vs-dispatch
+	// split: input events present in the trace but no visible reaction
+	// means Gecko is dropping them; absent from the trace means we never
+	// sent them.
 	const spawnStart = performance.now();
-	const frame = await spawnApp(
-		page,
-		"--no-remote --new-instance file:///opt/test-content/input-probe.html",
-		"firefox-esr",
-		180_000,
-	);
+	const frame = process.env.DIAG_XTRACE
+		? await spawnApp(
+				page,
+				"-n -o /tmp/ff-trace.log firefox-esr --no-remote --new-instance file:///opt/test-content/input-probe.html",
+				"xtrace",
+				180_000,
+			)
+		: await spawnApp(
+				page,
+				"--no-remote --new-instance file:///opt/test-content/input-probe.html",
+				"firefox-esr",
+				180_000,
+			);
 	const canvas = frame.locator('[data-testid="x11-canvas"]');
 	await expect(canvas).toBeVisible({ timeout: 180_000 });
 	console.log(
@@ -254,6 +266,45 @@ test("DIAG: firefox input with no timing assumptions", async ({
 			break;
 		}
 		await page.waitForTimeout(5000);
+	}
+
+	// Dump the server's own routing decisions. `browser input routing` logs
+	// the window the frontend addressed vs the deepest window actually under
+	// the pointer; if those disagree the toolkit is told the pointer is in
+	// one window and handed a button press for another.
+	{
+		const logs = await sidecarContainer.logs();
+		const text = await new Promise<string>((resolve) => {
+			let buf = "";
+			logs.on("data", (c) => {
+				buf += c.toString();
+			});
+			setTimeout(() => resolve(buf), 2500);
+		});
+		const routing = text
+			.split("\n")
+			.filter((l) => l.includes("browser input routing"))
+			.slice(-6);
+		console.log(
+			`DIAG ROUTING (${routing.length} lines):\n${routing.join("\n")}`,
+		);
+	}
+
+	if (process.env.DIAG_XTRACE) {
+		const counts = await sidecarContainer
+			.exec([
+				"sh",
+				"-c",
+				'grep -oE "Event (MotionNotify|ButtonPress|ButtonRelease|KeyPress|KeyRelease|EnterNotify|LeaveNotify)" /tmp/ff-trace.log | sort | uniq -c; ' +
+					'echo "--- which windows are the crossings/motion addressed to:"; ' +
+					'grep -E "Event (MotionNotify|EnterNotify|LeaveNotify|ButtonPress)" /tmp/ff-trace.log | grep -oE "event=0x[0-9a-f]+" | sort | uniq -c; ' +
+					'echo "--- GLX requests Firefox makes:"; ' +
+					'grep -oE "GLX-Request\\([0-9]+,[0-9]+\\): [A-Za-z]+" /tmp/ff-trace.log | sort | uniq -c | sort -rn | head -12; ' +
+					'echo "--- errors returned to Firefox:"; ' +
+					'grep -iE "Error" /tmp/ff-trace.log | cut -c1-140 | sort | uniq -c | sort -rn | head -8',
+			])
+			.then((r) => r.output);
+		console.log(`DIAG DELIVERED:\n${counts}`);
 	}
 
 	// Phase 3 — click, then sample.
