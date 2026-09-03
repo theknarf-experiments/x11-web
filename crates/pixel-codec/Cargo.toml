@@ -3,11 +3,20 @@ name = "x11-web-pixel-codec"
 version = "0.1.0"
 edition = "2021"
 
-# Encodes captured RGBA pixel buffers for the wire format both
-# sidecars send to the backend. Currently WebP-lossless. Centralised
-# here so we can tweak codec / quality / future dirty-region splitting
-# in one place rather than duplicating it in each sidecar.
+# Encodes captured RGBA pixel buffers for the wire format all three
+# sidecars send to the backend. WebP, with the lossless/lossy choice
+# made per frame from a content probe (`encode_rgba_auto`).
+# Centralised here so codec / quality / future dirty-region splitting
+# are tuned in one place rather than duplicated in each sidecar.
 
 [dependencies]
 # libwebp via libwebp-sys (statically vendored — no apt dep needed).
 webp = "0.3"
+
+[dev-dependencies]
+# PNG decoding for tests/codec_bench.rs only, so the benchmark can run
+# against the real captured-window corpus in e2e/tests/*-snapshots/
+# instead of synthetic stand-ins. Dev-only: nothing ships in a sidecar.
+# `image` is already in the lockfile (webp pulls it); this just turns
+# on its PNG decoder.
+image = { version = "0.25", default-features = false, features = ["png"] }
