@@ -445,12 +445,19 @@ fn run_capture_loop(
         };
         let t_capture = t0.elapsed();
         let t1 = Instant::now();
-        // Lossy q90: visually identical to lossless for typical UI /
-        // screen content but ~5-10× faster encode and smaller wire
-        // payload. Switch to `encode_rgba_lossless` if fidelity for
-        // tiny text or high-contrast edges matters.
+        // Was hardcoded lossy q90, on the belief that lossy is
+        // universally the cheaper codec. It isn't — it is only cheaper
+        // on colour-dense content, and on flat content it is both
+        // slower and bigger (a solid 1024x768 fill measures 24.2 ms /
+        // 1472 B lossy against 3.6 ms / 76 B lossless). SCStream
+        // captures plenty of flat windows — a Terminal, an editor, a
+        // mostly-empty document — so probing per frame is the better
+        // policy here too. Auto is not free of error (it can pick
+        // lossy on antialiased coloured text where lossless narrowly
+        // wins) but the error is bounded at ~2x, whereas the fixed
+        // policy it replaces was unbounded on flat content.
         let compressed =
-            x11_web_pixel_codec::encode_rgba_lossy(&frame.rgba, frame.width, frame.height, 90.0);
+            x11_web_pixel_codec::encode_rgba_auto(&frame.rgba, frame.width, frame.height);
         let t_encode = t1.elapsed();
         let raw_kb = frame.rgba.len() / 1024;
         let comp_kb = compressed.len() / 1024;
@@ -538,12 +545,23 @@ fn run_thumbnail_loop(
                 continue;
             }
         };
-        let compressed = x11_web_pixel_codec::encode_rgba_lossy(
-            &frame.rgba,
-            frame.width,
-            frame.height,
-            THUMBNAIL_QUALITY,
-        );
+        // Probe like the live path, but keep this path's own quality
+        // when the answer is "lossy": THUMBNAIL_QUALITY is a
+        // deliberate 70, chosen for a <30 KB 320 px preview, and
+        // routing straight through `encode_rgba_auto` would silently
+        // promote it to the live path's 90. So take the *decision*
+        // from the shared selector and supply the quality here. Small
+        // windows aren't downscaled at all, and those are exactly the
+        // flat ones lossless wins on.
+        let codec = match x11_web_pixel_codec::select_codec(&frame.rgba, frame.width, frame.height)
+        {
+            x11_web_pixel_codec::Codec::Lossless => x11_web_pixel_codec::Codec::Lossless,
+            x11_web_pixel_codec::Codec::Lossy(_) => {
+                x11_web_pixel_codec::Codec::Lossy(THUMBNAIL_QUALITY)
+            }
+        };
+        let compressed =
+            x11_web_pixel_codec::encode_rgba(&frame.rgba, frame.width, frame.height, codec);
         if tx
             .send(SidecarToBackend::DisplayUpdate {
                 client_id: client_id.clone(),

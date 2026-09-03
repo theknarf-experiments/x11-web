@@ -13,9 +13,9 @@
 //! ## Why `[R, G, B, A]` is the target, verified rather than assumed
 //!
 //! `DisplayUpdate::PutImage.data` is handed to the sidecar, which
-//! calls `x11_web_pixel_codec::encode_rgba_lossless` — a thin wrapper
-//! over `webp::Encoder::from_rgba`, i.e. literally "bytes in R, G, B,
-//! A order". The X11 server library documents the same contract
+//! calls `x11_web_pixel_codec::encode_rgba_auto` — which feeds
+//! `webp::Encoder::from_rgba` either way, i.e. literally "bytes in R,
+//! G, B, A order". The X11 server library documents the same contract
 //! ("Pixels are raw RGBA", crates/x11-server/.../sync_flush.rs) and
 //! does its own BGRA→RGBA swap at the X11 wire boundary. So the swap
 //! belongs here, once, at the wl_shm boundary — and nowhere else.

@@ -17,8 +17,13 @@ struct Frame {
         # know about. Cap'n Proto unions need at least two members.
         noVariant @0 :Void;
 
-        # Pixel rectangle for a window. Raw RGBA, no compression, no
-        # base64 — DataChannel carries arbitrary bytes.
+        # Pixel rectangle for a window. WebP-encoded (the sidecar
+        # picks lossless or lossy per frame from a content probe —
+        # see crates/pixel-codec); no base64, DataChannel carries
+        # arbitrary bytes. Both WebP modes share one RIFF container,
+        # so there is deliberately no codec discriminator here: the
+        # backend forwards the blob opaquely and the frontend's
+        # createImageBitmap sniffs the bitstream chunk.
         putImage @1 :PutImage;
 
         # Low-rate, downscaled preview of a window's pixels. Same

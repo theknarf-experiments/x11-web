@@ -641,8 +641,13 @@ async fn handle_command(
 }
 
 /// Compress `DisplayUpdate::PutImage`'s raw-RGBA payload into the
-/// WebP-lossless format the wire (and the frontend's `createImageBitmap`
+/// WebP format the wire (and the frontend's `createImageBitmap`
 /// decoder) expects. All other variants are returned unchanged.
+///
+/// `encode_rgba_auto` picks lossless or lossy per frame from a
+/// content probe — see the identical helper in `crates/sidecar`. A
+/// Wayland client committing a photo- or browser-like surface hit the
+/// same 200-300 ms lossless cliff the X11 sidecar did.
 fn encode_for_wire(update: DisplayUpdate) -> DisplayUpdate {
     match update {
         DisplayUpdate::PutImage {
@@ -653,8 +658,7 @@ fn encode_for_wire(update: DisplayUpdate) -> DisplayUpdate {
             height,
             data,
         } => {
-            let encoded =
-                x11_web_pixel_codec::encode_rgba_lossless(&data, width as u32, height as u32);
+            let encoded = x11_web_pixel_codec::encode_rgba_auto(&data, width as u32, height as u32);
             DisplayUpdate::PutImage {
                 window_id,
                 x,

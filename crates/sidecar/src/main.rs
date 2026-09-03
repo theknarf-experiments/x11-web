@@ -811,8 +811,18 @@ async fn handle_command(
 }
 
 /// Compress `DisplayUpdate::PutImage`'s raw-RGBA payload into the
-/// WebP-lossless format the wire (and the frontend's `createImageBitmap`
+/// WebP format the wire (and the frontend's `createImageBitmap`
 /// decoder) expects. All other variants are returned unchanged.
+///
+/// `encode_rgba_auto` picks lossless or lossy per frame from a
+/// content probe. This used to be hardcoded lossless, which is right
+/// for the flat UI that most X11 damage is but pathological for a
+/// colour-dense window: a full 921x691 Firefox repaint measured
+/// 233 ms lossless against 30 ms lossy, while also producing 2.1x
+/// the bytes. Since this runs on `spawn_blocking` in the display
+/// loop, a 233 ms encode is 233 ms of added latency on that window's
+/// next frame. Both WebP modes are the same container, so nothing
+/// downstream — wire, backend, frontend — has to know which was used.
 fn encode_for_wire(update: DisplayUpdate) -> DisplayUpdate {
     match update {
         DisplayUpdate::PutImage {
@@ -823,8 +833,7 @@ fn encode_for_wire(update: DisplayUpdate) -> DisplayUpdate {
             height,
             data,
         } => {
-            let encoded =
-                x11_web_pixel_codec::encode_rgba_lossless(&data, width as u32, height as u32);
+            let encoded = x11_web_pixel_codec::encode_rgba_auto(&data, width as u32, height as u32);
             DisplayUpdate::PutImage {
                 window_id,
                 x,
