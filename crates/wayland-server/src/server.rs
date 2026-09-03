@@ -64,6 +64,12 @@ impl WaylandServer {
     /// render tick period (16 ms ≈ 60 Hz) — it is also what drives
     /// `wl_surface.frame` callback delivery, without which toolkit
     /// clients paint exactly one frame and then block forever.
+    ///
+    /// **Precondition:** the embedder must already have called
+    /// [`ensure_xdg_runtime_dir`] from `main`, single-threaded. This
+    /// calls it again defensively, but if `XDG_RUNTIME_DIR` is still
+    /// unset at *this* point the fallback assignment happens with the
+    /// embedder's threads live, which is UB in glibc.
     pub fn new(
         update_tx: mpsc::UnboundedSender<TaggedDisplayUpdate>,
         client_connected_tx: mpsc::UnboundedSender<(String, u32)>,
@@ -184,17 +190,21 @@ fn compositor_thread(
         }};
     }
 
-    // `ListeningSocket::bind_auto` resolves the name against
-    // $XDG_RUNTIME_DIR, so this thread's view of the variable has to
-    // match the directory `new()` created and the one children are
-    // told about. Setting it here rather than relying on the ambient
-    // environment is what makes the library correct when embedded by
-    // a process that never set it.
-    //
-    // SAFETY: `set_var` is only unsound when another thread reads the
-    // environment concurrently. This runs before any client exists
-    // and before the sidecar spawns anything.
-    std::env::set_var("XDG_RUNTIME_DIR", &xdg_runtime_dir);
+    // `ListeningSocket::bind_auto` resolves the socket name against
+    // $XDG_RUNTIME_DIR *from the environment*, so the variable has to
+    // already name the directory `new()` prepared and the one children
+    // are told about. There used to be a `set_var` right here; it is
+    // gone on purpose. glibc's setenv is UB with other threads live,
+    // and by the time this thread runs the embedder's tokio runtime —
+    // and, in the sidecar's case, a dbus-daemon child plus its stdout
+    // drain tasks — is already up. The assignment now happens exactly
+    // once, in [`ensure_xdg_runtime_dir`], which the embedder is
+    // required to call from `main` before it starts anything.
+    debug_assert_eq!(
+        std::env::var("XDG_RUNTIME_DIR").ok().as_deref(),
+        xdg_runtime_dir.to_str(),
+        "XDG_RUNTIME_DIR must already point at the prepared directory"
+    );
 
     let mut event_loop: EventLoop<State> = match EventLoop::try_new() {
         Ok(l) => l,
@@ -403,26 +413,43 @@ fn apply_command(state: &mut State, cmd: Command) {
     }
 }
 
-/// Resolve and create `XDG_RUNTIME_DIR`.
+/// Resolve, create and (only if it is unset) *export*
+/// `XDG_RUNTIME_DIR`.
 ///
-/// `debian:bookworm-slim` has no `/run/user/0`, and
-/// `ListeningSocket::bind` fails outright without it — which would
-/// kill the compositor before any client ever connects, with the only
-/// symptom being a sidecar that exits at startup. The entrypoint
-/// script does this too; doing it here as well costs one `mkdir` and
-/// covers the case where the library is embedded by something else.
+/// **Call this from `main`, before starting a runtime, a thread or a
+/// child process.** When the variable is missing this function falls
+/// back to `/run/user/<euid>` and writes it into the environment, and
+/// glibc's `setenv` is undefined behaviour once any other thread is
+/// live. [`WaylandServer::new`] calls it again — it is idempotent, and
+/// by then the variable is set so no assignment happens — but that
+/// call is a safety net, not the contract.
+///
+/// Creating the directory matters because `debian:bookworm-slim` has no
+/// `/run/user/0` and `ListeningSocket::bind` fails outright without it,
+/// which would kill the compositor before any client ever connects with
+/// the only symptom being a sidecar that exits at startup. The
+/// entrypoint script does this too; doing it here as well costs one
+/// `mkdir` and covers embedders that have no entrypoint script.
 ///
 /// The 0700 mode is not cosmetic: libwayland's client-side
 /// `wl_display_connect` warns loudly about a group/world-accessible
 /// runtime dir, and some toolkits refuse it.
-fn ensure_xdg_runtime_dir() -> io::Result<PathBuf> {
+pub fn ensure_xdg_runtime_dir() -> io::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = match std::env::var("XDG_RUNTIME_DIR") {
         Ok(d) if !d.is_empty() => PathBuf::from(d),
-        // SAFETY: geteuid() is always safe — it takes no arguments,
-        // touches no memory, and cannot fail.
-        _ => PathBuf::from(format!("/run/user/{}", unsafe { libc::geteuid() })),
+        _ => {
+            // SAFETY: geteuid() is always safe — it takes no arguments,
+            // touches no memory, and cannot fail.
+            let dir = PathBuf::from(format!("/run/user/{}", unsafe { libc::geteuid() }));
+            // SAFETY: see the doc comment — the caller guarantees this
+            // runs single-threaded. Reached only when the variable is
+            // absent, which in every packaged deployment it is not
+            // (Dockerfile.sidecar-wayland sets it as an image ENV).
+            std::env::set_var("XDG_RUNTIME_DIR", &dir);
+            dir
+        }
     };
 
     if !dir.exists() {

@@ -16,9 +16,30 @@ xkbcommon keymap.
 
 Because waylandcraft is GPLv3, every file in this crate that is derived
 from it carries a header comment naming the upstream file, the commit
-above, and the license, and all such derived code is confined to this
-crate. No waylandcraft-derived code exists anywhere else in the
+above, and the license, and all such derived *source* is confined to
+this crate. No waylandcraft-derived source exists anywhere else in the
 x11-web repository.
+
+Scope of the copyleft (read this part)
+--------------------------------------
+
+Source containment is not obligation containment. Any binary that links
+this crate is a combined work with the GPLv3 code in it and can only be
+conveyed under GPLv3. Today that is exactly one binary:
+
+    crates/sidecar-wayland  ->  x11-web-sidecar-wayland
+                                (built into Dockerfile.sidecar-wayland)
+
+Both that crate's Cargo.toml and this one declare
+`license = "GPL-3.0-only"`, and the runtime stage of
+Dockerfile.sidecar-wayland ships ./COPYING beside the binary, because
+GPLv3 sections 4 and 5 require the License to travel with the work.
+
+Crates outside that link graph are unaffected — x11-web-backend,
+x11-web-x11-server, x11-web-sidecar, x11-web-wire and the frontend
+neither contain nor link any waylandcraft-derived code. (The two
+non-dependent Dockerfiles stub these two crates out of the workspace
+precisely so nothing links them by accident.)
 
 Files derived from upstream
 ---------------------------
@@ -72,6 +93,13 @@ Dockerfile.sidecar-wayland, not by cargo.
 Note
 ----
 
-The x11-web repository ships no top-level LICENSE file; adding one is
-the repository owner's call. This NOTICE records the provenance so the
-obligation is visible and actionable.
+./COPYING is a verbatim copy of the GNU General Public License v3, taken
+from the upstream repository, and is the license this crate and anything
+linking it are conveyed under.
+
+That is deliberately a *crate-local* license file, not a repository-wide
+one: the x11-web repository still ships no top-level LICENSE, and adding
+one is the repository owner's call. A crate-local COPYING relicenses
+nothing outside this crate's link graph — it only discharges the GPLv3
+requirement to convey the License with the work that is actually
+covered by it.

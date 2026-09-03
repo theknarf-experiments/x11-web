@@ -42,10 +42,18 @@ test.afterEach(async ({ waylandSidecarContainer }) => {
 test("compositor advertises the vertical slice's globals", async ({
 	waylandSidecarContainer,
 }) => {
+	// The socket name is *derived*, not hardcoded to wayland-1:
+	// `ListeningSocketSource::new_auto` takes the first free name in
+	// wayland-1..wayland-32, and a stale lock file left behind in a
+	// `.withReuse()`d container moves it to wayland-2 — at which point a
+	// literal would fail with a connect error rather than with anything
+	// that names the real problem. Same expression as
+	// e2e/scripts/wayland-smoke.sh.
 	const result = await waylandSidecarContainer.exec([
 		"bash",
 		"-c",
-		"XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-1 wayland-info",
+		"export XDG_RUNTIME_DIR=/run/user/0; " +
+			"WAYLAND_DISPLAY=$(ls /run/user/0 | grep -E '^wayland-[0-9]+$' | head -1) wayland-info",
 	]);
 	expect(result.exitCode).toBe(0);
 	for (const iface of [

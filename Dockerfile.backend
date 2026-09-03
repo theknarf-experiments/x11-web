@@ -12,8 +12,34 @@ COPY Cargo.toml Cargo.lock ./
 # patches, and regenerates the protocol bindings.
 COPY tools/setup-x11rb-fork.sh tools/setup-x11rb-fork.sh
 COPY crates/x11rb-protocol-msb/ crates/x11rb-protocol-msb/
+# Bookworm's git 2.39 speaks HTTP/2 and advertises `br, zstd` in
+# Accept-Encoding without being able to decode either. Behind a
+# TLS-terminating proxy that takes those encodings at face value the
+# ref advertisement comes back unreadable, git decides it must need
+# credentials, and the clone below dies with the very misleading
+#   fatal: could not read Username for 'https://github.com'
+# even though plain `curl` of the same URL returns 200. Pinning
+# HTTP/1.1 sidesteps the whole class, at the cost of one extra round
+# trip on a clone that happens once per image build. (Same line, same
+# reason, as Dockerfile.sidecar-wayland — observed failing here too.)
+RUN git config --global http.version HTTP/1.1
 RUN bash tools/setup-x11rb-fork.sh
 COPY crates/ crates/
+# `wayland-server` / `sidecar-wayland` are workspace members the backend
+# does not depend on, and their manifests carry a git dependency on
+# Smithay. Cargo resolves the WHOLE workspace before it builds anything,
+# so leaving them intact makes every cold backend build clone the
+# Smithay repository for a crate this image never compiles — a second
+# github.com dependency on the critical path of `compose up` and of
+# every e2e worker. Replace them with dependency-free stubs, the same
+# trick Dockerfile.sidecar and Dockerfile.sidecar-wayland use for their
+# own non-dependencies.
+RUN for crate in wayland-server sidecar-wayland; do \
+      rm -rf crates/$crate; mkdir -p crates/$crate/src; \
+      printf '[package]\nname = "x11-web-%s"\nversion = "0.1.0"\nedition = "2021"\n' "$crate" \
+        > crates/$crate/Cargo.toml; \
+      printf 'fn main() {}\n' > crates/$crate/src/main.rs; \
+    done
 RUN cargo build --release --bin x11-web-backend
 
 FROM debian:bookworm-slim

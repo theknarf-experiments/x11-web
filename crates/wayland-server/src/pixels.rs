@@ -339,9 +339,59 @@ pub fn crop_rgba(fb: &[u8], fb_w: i32, fb_h: i32, rect: Rect) -> Vec<u8> {
     out
 }
 
+/// Force every pixel's alpha to 0xFF, in place.
+///
+/// The last thing that happens to a `PutImage` payload, and it is not
+/// optional. Two facts collide otherwise:
+///
+///   1. The frontend paints a `PutImage` with
+///      `ctx.drawImage(bitmap, x, y)` — plain source-over onto a
+///      persistent back buffer, with no `clearRect` first (see
+///      `ClientRenderer.pushPutImage`). It was written against the X11
+///      sidecar, whose framebuffer is opaque by construction, so a
+///      sub-255 alpha there means "blend with whatever was on screen
+///      last frame" rather than "replace it".
+///   2. wl_shm's `Argb8888` is **premultiplied**, while WebP →
+///      `createImageBitmap` is straight alpha. Shipping a premultiplied
+///      translucent pixel through that path darkens it.
+///
+/// So a client that renders any translucency inside its window geometry
+/// would produce ghosting *and* wrong colours. Flattening to opaque is
+/// exactly right rather than merely safe: the composite ran against an
+/// opaque black framebuffer, and premultiplied-over-black *is* the
+/// premultiplied RGB, so the bytes already are the correct opaque
+/// colour — only the alpha byte is lying.
+///
+/// (Genuine per-window translucency would mean a `clearRect` in the
+/// frontend plus an un-premultiply pass here. Out of scope, and not
+/// something a window on an opaque canvas can show off anyway.)
+pub fn force_opaque(rgba: &mut [u8]) {
+    for a in rgba.iter_mut().skip(3).step_by(BPP) {
+        *a = 0xFF;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn force_opaque_rewrites_only_the_alpha_byte() {
+        // Premultiplied half-transparent red, and a fully transparent
+        // pixel — the two shapes that used to ghost.
+        let mut buf = vec![128, 0, 0, 128, 0, 0, 0, 0];
+        force_opaque(&mut buf);
+        assert_eq!(buf, vec![128, 0, 0, 255, 0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn force_opaque_tolerates_a_short_trailing_pixel() {
+        // crop_rgba can return early on a truncated framebuffer; the
+        // caller drops such a payload, but this must not panic first.
+        let mut buf = vec![1, 2, 3];
+        force_opaque(&mut buf);
+        assert_eq!(buf, vec![1, 2, 3]);
+    }
 
     #[test]
     fn xrgb_alpha_is_padding() {

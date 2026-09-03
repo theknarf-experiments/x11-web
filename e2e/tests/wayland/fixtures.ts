@@ -11,6 +11,13 @@
  * is one extra container per worker, and no changes at all to
  * `../fixtures.ts`.
  *
+ * The other half of "blast radius zero" lives in
+ * `../../playwright.config.ts`: this directory sits in `testIgnore`
+ * unless `X11WEB_WAYLAND_E2E=1` is set, so the default `pnpm test`
+ * never pays for the cold smithay build the 900s fixture timeouts
+ * below exist for. Run it with
+ * `X11WEB_WAYLAND_E2E=1 pnpm exec playwright test tests/wayland`.
+ *
  * Two further simplifications over the X11 fixtures:
  *
  *   - `OIDC_ISSUER` is omitted, so the backend runs in anonymous mode
@@ -156,12 +163,21 @@ async function doSetup() {
 				// .withReuse() the target line may already have scrolled
 				// out of the buffer on a worker respawn.
 				//
+				// `[ -S ]` on each candidate, NOT a bare `ls wayland-*`:
+				// libwayland's `bind_auto` creates `wayland-N.lock`
+				// *before* it binds `wayland-N`, and a glob matches the
+				// lock. Probing for an actual socket closes the window in
+				// which the container is declared ready but the first
+				// `wayland-info` exec would fail to connect.
+				//
 				// `pgrep -f`, NOT `-x`: /proc/<pid>/comm truncates to 15
 				// characters and `x11-web-sidecar-wayland` is 23, so an
 				// exact-name match can never hit.
 				.withWaitStrategy(
+					// (The strategy already wraps this in `/bin/sh -c`, so
+					// it is written as plain shell, not a nested invocation.)
 					Wait.forSuccessfulCommand(
-						"ls /run/user/0/wayland-* >/dev/null 2>&1 && pgrep -f x11-web-sidecar-wayland >/dev/null",
+						'pgrep -f x11-web-sidecar-wayland >/dev/null || exit 1; for f in /run/user/0/wayland-[0-9]*; do [ -S "$f" ] && exit 0; done; exit 1',
 					),
 				)
 				.withReuse()

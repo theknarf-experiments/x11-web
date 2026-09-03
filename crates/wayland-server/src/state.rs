@@ -97,6 +97,12 @@ pub(crate) struct State {
     pub update_tx: UnboundedSender<TaggedDisplayUpdate>,
     pub client_connected_tx: UnboundedSender<(String, u32)>,
     pub router: WindowRouter,
+    /// Last value the render tick read from
+    /// `WindowRouter::is_consuming`, kept so the tick can spot the
+    /// edge. Starts `false`, matching the router's own initial state —
+    /// nothing is draining the update channel until the embedder has
+    /// dialled a backend.
+    pub streaming: bool,
 
     // These three are never read after construction, but must not be
     // dropped: each owns the `GlobalId` of the protocol global it
@@ -154,6 +160,7 @@ impl State {
             update_tx,
             client_connected_tx,
             router,
+            streaming: false,
             viewporter_state,
             single_pixel_buffer_state,
             xdg_decoration_state,

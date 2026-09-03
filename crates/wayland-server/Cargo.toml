@@ -2,6 +2,10 @@
 name = "x11-web-wayland-server"
 version = "0.1.0"
 edition = "2021"
+# Derived from waylandcraft (GPLv3). Upstream grants no "or later"
+# option, so this is GPL-3.0-only. Verbatim license text lives in
+# ./COPYING; provenance, file by file, in ./NOTICE.
+license = "GPL-3.0-only"
 
 [lib]
 path = "src/lib.rs"

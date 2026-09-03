@@ -42,6 +42,40 @@
 //! the unit tests for the two bugs most likely to be silent
 //! (red/blue-swapped framebuffers, and mis-mapped mouse buttons).
 //!
+//! ## Flow control
+//!
+//! The compositor produces at 60 Hz; the embedder's WebP encoder is an
+//! order of magnitude slower, and `UnboundedSender::send` never blocks.
+//! Left alone, that combination grows the update channel without bound
+//! (a 1280x800 raw RGBA frame is ~4 MB). So the render tick asks
+//! [`WindowRouter`] for per-window credit before it emits, and
+//! *withholds `wl_surface.frame` callbacks* from a window that has none
+//! — which is what actually pushes back on the client. The embedder
+//! returns credit with
+//! [`frame_shipped`][WindowRouter::frame_shipped], and brackets a
+//! session with [`set_consuming`][WindowRouter::set_consuming]; while
+//! nothing is consuming, frames are composited (clients keep animating)
+//! but dropped rather than queued for a reader that does not exist.
+//!
+//! ## Provenance and licensing
+//!
+//! The compositor half of this crate is derived from **waylandcraft**
+//! (<https://github.com/EVV1E/waylandcraft>, commit
+//! `233d1431e6acbad1d0c47dfba44d971ce0cebfe8`), which is **GPLv3**.
+//! `state.rs`, `surface.rs`, `seat.rs`, `output.rs` and `utils.rs` each
+//! carry a header naming their upstream file and what changed;
+//! `server.rs`, `router.rs`, `windows.rs`, `input.rs`, `pixels.rs`,
+//! `translate.rs` and `decoration.rs` are original. The upstream
+//! Minecraft/JNI half — the dmabuf/EGL import path, xwayland-satellite,
+//! `.desktop` launching and `wl_data_device` — was not ported.
+//!
+//! Consequently this crate, and **any binary that links it**
+//! (`x11-web-sidecar-wayland`, and the image
+//! `Dockerfile.sidecar-wayland` builds), is conveyable only under
+//! GPLv3. Crates outside that link graph are unaffected. See
+//! `crates/wayland-server/NOTICE` for the file-by-file record and
+//! `crates/wayland-server/COPYING` for the license text.
+//!
 //! ## Threading
 //!
 //! smithay's `EventLoop` and `Display` are `!Send`, and tokio owns the
@@ -80,7 +114,7 @@ mod windows;
 #[cfg(target_os = "linux")]
 pub use router::WindowRouter;
 #[cfg(target_os = "linux")]
-pub use server::WaylandServer;
+pub use server::{ensure_xdg_runtime_dir, WaylandServer};
 
 /// A display update tagged with the `client_id` that produced it.
 ///

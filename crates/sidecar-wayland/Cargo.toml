@@ -2,6 +2,11 @@
 name = "x11-web-sidecar-wayland"
 version = "0.1.0"
 edition = "2021"
+# This binary statically links `x11-web-wayland-server`, which is a
+# GPLv3 derivative of waylandcraft — so the linked binary (and
+# Dockerfile.sidecar-wayland's image) is a combined work conveyable only
+# under GPLv3. See crates/wayland-server/{NOTICE,COPYING}.
+license = "GPL-3.0-only"
 
 [[bin]]
 name = "x11-web-sidecar-wayland"
@@ -32,6 +37,9 @@ opentelemetry = { version = "0.31", features = ["metrics"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# GPLv3: taking this dependency is what makes the resulting binary a
+# combined work with waylandcraft-derived code. See the `license` field
+# above and crates/wayland-server/NOTICE.
 # smithay lives behind this path dep's own Linux gate, so a macOS
 # build of this workspace never even resolves a compositor.
 x11-web-wayland-server = { path = "../wayland-server" }

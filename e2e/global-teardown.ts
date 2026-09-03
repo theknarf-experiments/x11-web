@@ -55,14 +55,17 @@ export default function globalTeardown() {
 
 	// Drop the per-worker Docker networks created by the fixtures
 	// modules: `x11web-worker-*` (tests/fixtures.ts) and
-	// `x11web-wl-worker-*` (tests/wayland/fixtures.ts). Substring
-	// filter, so the shorter prefix covers both.
+	// `x11web-wl-worker-*` (tests/wayland/fixtures.ts). Both prefixes
+	// are spelled out: `--filter name=` is a substring match, so the
+	// shorter `x11web-` would also sweep up (and delete) any network a
+	// developer created with that string anywhere in its name. Repeated
+	// `name=` filters are OR-ed by docker.
 	const networks = (() => {
 		try {
-			return execSync(`docker network ls --filter "name=x11web-" -q`, {
-				encoding: "utf-8",
-				timeout: 10_000,
-			}).trim();
+			return execSync(
+				`docker network ls --filter "name=x11web-worker-" --filter "name=x11web-wl-worker-" -q`,
+				{ encoding: "utf-8", timeout: 10_000 },
+			).trim();
 		} catch {
 			return "";
 		}

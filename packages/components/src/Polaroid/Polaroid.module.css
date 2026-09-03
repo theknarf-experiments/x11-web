@@ -3,15 +3,8 @@
    below. Standalone Polaroids render flat; the tilt cycle only
    applies when nested in `.stack`. */
 .polaroid {
-	/* The card is a <button> so it is keyboard-reachable; strip the
-	   UA chrome that would otherwise fight the paper look. Font is
-	   NOT inherited on purpose — `.caption` sets the handwriting
-	   face itself. */
-	appearance: none;
-	border: 0;
-	margin: 0;
-	text-align: inherit;
-	color: inherit;
+	/* A plain <div role="button"> (see Polaroid.tsx for why it is not a
+	   real <button>), so there is no UA form-control chrome to reset. */
 	display: flex;
 	flex-direction: column;
 	flex: 0 0 auto;

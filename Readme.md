@@ -38,7 +38,9 @@ Rust service that runs alongside X11 applications. Contains:
 
 The same idea for Wayland clients. `crates/wayland-server` is an embeddable headless Wayland compositor (smithay-based, derived from [waylandcraft](https://github.com/EVV1E/waylandcraft) — see `crates/wayland-server/NOTICE`) that turns every mapped `xdg_toplevel` into the same `DisplayUpdate` stream the X11 server emits, and injects browser input back through `wl_seat`. `crates/sidecar-wayland` is the binary around it: process manager (children get `WAYLAND_DISPLAY` instead of `DISPLAY`), QUIC connection to the backend, WebP encoding.
 
-Scope is deliberately narrow: `wl_shm` software buffers only (no dmabuf/EGL/GPU, no XWayland), `xdg_shell` toplevels and popups, `wl_seat` pointer + keyboard, `wl_output`, `viewporter`, `xdg_decoration`. Both crates only build on Linux; on other hosts they compile to a stub that exits with a message, so `cargo check --workspace` stays green on macOS.
+Scope is deliberately narrow: `wl_shm` software buffers only (no dmabuf/EGL/GPU, no XWayland), `xdg_shell` toplevels and popups, `wl_seat` pointer + keyboard, `wl_output`, `viewporter`, `xdg_decoration`. Both crates only build on Linux; on other hosts they compile to a stub that exits with a message, so `cargo check --workspace` stays green on macOS. Typecheck or test them for real with `bash tools/wayland-build.sh <cargo args>`, which runs cargo inside a Linux container with persistent registry/target volumes — never build smithay on the macOS host.
+
+**Licensing:** `crates/wayland-server` is a GPLv3 derivative of waylandcraft, so `x11-web-sidecar-wayland` (which links it) and `Dockerfile.sidecar-wayland`'s image are combined works conveyable only under GPLv3. Nothing else in the tree links it — the other Dockerfiles stub both crates out of the workspace. See `crates/wayland-server/NOTICE` for the file-by-file provenance and `crates/wayland-server/COPYING` for the license text.
 
 ### Protocol (`crates/protocol`)
 
@@ -149,10 +151,17 @@ pnpm test
 ```
 
 The Wayland suite (`e2e/tests/wayland/`) brings up its own backend +
-Wayland sidecar pair, so it doesn't disturb the X11 specs:
+Wayland sidecar pair, so it doesn't disturb the X11 specs. It is **opt
+in** via `X11WEB_WAYLAND_E2E=1` — `pnpm test` skips it, because its
+first run cold-builds a release smithay compile plus a second backend
+per worker. The env var is the only way in; naming the path alone is
+not enough, since `testIgnore` drops the files before the CLI filter
+ever sees them.
 
 ```sh
-cd e2e && pnpm exec playwright test tests/wayland
+cd e2e && X11WEB_WAYLAND_E2E=1 pnpm exec playwright test tests/wayland
+# or, to include it in a full run:
+cd e2e && X11WEB_WAYLAND_E2E=1 pnpm test
 ```
 
 For a browser-free check of the Wayland sidecar image — socket, global

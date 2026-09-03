@@ -13,16 +13,18 @@
 #   4. that toplevel produced PutImage updates — i.e. pixels actually
 #      made it through commit -> swizzle -> composite -> crop
 #
-# No backend is involved: the sidecar's QUIC dial fails in a loop and
-# the DisplayUpdates queue up unread in the channel, which is fine for
-# the ~20s this takes. That is deliberate — it isolates "the compositor
-# and its clients work" from "the wire works", and it means this script
-# can be re-run in seconds while debugging without standing up a
-# backend, a browser or Playwright.
+# No backend is involved: the sidecar's QUIC dial fails in a loop, so
+# nothing ever calls `WindowRouter::set_consuming(true)` and the
+# compositor composites every frame but drops it instead of queueing it
+# for a reader that does not exist. That is deliberate — it isolates
+# "the compositor and its clients work" from "the wire works", and it
+# means this script can be re-run in seconds while debugging without
+# standing up a backend, a browser or Playwright.
 #
-# Step 4 reads the `emitting PutImage` trace from
-# crates/wayland-server/src/windows.rs, which is the only externally
-# visible evidence of the pixel path when nothing drains the channel.
+# Which is exactly why steps 3 and 4 count the `emitting PutImage` trace
+# from crates/wayland-server/src/windows.rs rather than anything on the
+# wire: with no consumer that line (which carries `shipped=false` here)
+# is the only externally visible evidence of the pixel path.
 set -euo pipefail
 
 IMAGE="${1:-x11web-sidecar-wayland}"

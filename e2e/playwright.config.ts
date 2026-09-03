@@ -10,6 +10,21 @@ const WORKERS = process.env.PLAYWRIGHT_WORKERS
 
 export default defineConfig({
 	testDir: "./tests",
+	// The Wayland suite builds its own sidecar image (a cold smithay
+	// release compile, plus a weston .deb extraction and a
+	// wayland-scanner probe build) and stands up its own backend on top
+	// of the X11 trio — well past what the default run should pay, and a
+	// build timeout there would fail the whole suite rather than one
+	// spec. So it is opt-in:
+	//
+	//     X11WEB_WAYLAND_E2E=1 pnpm exec playwright test tests/wayland
+	//
+	// The env var is the ONLY way in. Naming the path on the command
+	// line does not help: positional CLI arguments filter files that
+	// have already been collected, and `testIgnore` removes them before
+	// collection — verified, `playwright test tests/wayland --list`
+	// reports "Total: 0 tests in 0 files" without the variable.
+	testIgnore: process.env.X11WEB_WAYLAND_E2E ? [] : ["**/tests/wayland/**"],
 	// 60s is enough for protocol/atom probe tests; specific slow tests
 	// (rendercheck full suite, x11perf, etc.) override this with
 	// test.setTimeout(...) where they actually need more.

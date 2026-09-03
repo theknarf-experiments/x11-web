@@ -23,6 +23,11 @@
 //!     The session bus itself is still started, for the children.
 //!   * `XAUTHORITY` has no analogue: a Wayland socket's access control
 //!     *is* filesystem permissions on `$XDG_RUNTIME_DIR`.
+//!   * `run_session` has a fourth future, `display_loop`, where the X11
+//!     sidecar encodes inline in a `select!` arm. Two reasons, both
+//!     documented at the code: WebP encoding must not stall input, and
+//!     the compositor's per-window frame credit has to be returned from
+//!     wherever the frame is actually shipped.
 //!
 //! `StartWindowCapture` / `StopWindowCapture` are ignored: like the X11
 //! sidecar, this one auto-streams every window.
@@ -293,6 +298,15 @@ async fn run_session(
     // here, the events loop drains it through the wire writer.
     let (tx, mut rx) = mpsc::unbounded_channel::<SidecarToBackend>();
 
+    // Tell the compositor there is now something on the other end of
+    // the update channel. Until this, it composites but drops — which
+    // is what keeps an unconnected sidecar from accumulating frames
+    // forever — and from here on it also throttles each window to
+    // `MAX_FRAMES_IN_FLIGHT` un-shipped frames. The matching
+    // `set_consuming(false)` at the bottom of this function is what
+    // guarantees a dropped session cannot leave a window stalled.
+    window_router.set_consuming(true);
+
     // Incoming messages: the recv loop owns the wire reader, decodes
     // Cap'n Proto, forwards BackendToSidecar over this channel so the
     // events loop can keep `process_manager` borrowed exclusively.
@@ -389,24 +403,6 @@ async fn run_session(
                         return;
                     }
                 }
-                Some((client_id, update)) = display_rx.recv() => {
-                    // The compositor emits raw RGBA in PutImage. The
-                    // wire format is WebP-lossless; encode here so the
-                    // compositor library doesn't have to know about
-                    // pixel codecs. Other DisplayUpdate variants pass
-                    // through unchanged.
-                    let update = encode_for_wire(update);
-                    if let Some(m) = telemetry::metrics() {
-                        let kind = match &update {
-                            DisplayUpdate::PutImage { .. } => "put_image",
-                            DisplayUpdate::WindowThumbnail { .. } => "thumbnail",
-                            _ => "other",
-                        };
-                        m.display_updates
-                            .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
-                    }
-                    let _ = tx.send(SidecarToBackend::DisplayUpdate { client_id, update });
-                }
                 Some((client_id, peer_pid)) = client_connected_rx.recv() => {
                     // Identical to the X11 sidecar, and it works for
                     // the same reason: the compositor reads the
@@ -440,11 +436,78 @@ async fn run_session(
         }
     };
 
+    // Display updates get their own future rather than a `select!` arm
+    // in `events_loop`, and that is the point: WebP-lossless encoding a
+    // 1 MP frame costs 100-300 ms, and an arm body runs to completion
+    // before the loop re-selects. Sharing the loop meant every input
+    // event and every heartbeat write queued behind an encode. As a
+    // sibling of `events_loop` in the final `select!` it is polled
+    // concurrently instead, and `spawn_blocking` keeps the CPU work off
+    // the async worker entirely. (`crates/sidecar` still has the
+    // original shape; the same fix applies there.)
+    let tx_display = tx.clone();
+    let display_loop = async {
+        while let Some((client_id, update)) = display_rx.recv().await {
+            // Captured before the move into the blocking closure —
+            // afterwards the encoded update is a different value and
+            // the credit has to be returned against the original id.
+            let window_id = match &update {
+                DisplayUpdate::PutImage { window_id, .. } => Some(window_id.clone()),
+                _ => None,
+            };
+            // The compositor emits raw RGBA in PutImage. The wire
+            // format is WebP-lossless; encode here so the compositor
+            // library doesn't have to know about pixel codecs. Other
+            // DisplayUpdate variants pass through unchanged and are not
+            // worth a runtime hop.
+            let update = match window_id {
+                Some(_) => match tokio::task::spawn_blocking(move || encode_for_wire(update)).await
+                {
+                    Ok(u) => u,
+                    // The blocking pool only fails this way on runtime
+                    // shutdown; there is nothing left to send to.
+                    Err(e) => {
+                        warn!("PutImage encode task failed: {e}");
+                        return;
+                    }
+                },
+                None => update,
+            };
+            if let Some(m) = telemetry::metrics() {
+                let kind = match &update {
+                    DisplayUpdate::PutImage { .. } => "put_image",
+                    DisplayUpdate::WindowThumbnail { .. } => "thumbnail",
+                    _ => "other",
+                };
+                m.display_updates
+                    .add(1, &[opentelemetry::KeyValue::new("kind", kind)]);
+            }
+            if tx_display
+                .send(SidecarToBackend::DisplayUpdate { client_id, update })
+                .is_err()
+            {
+                return;
+            }
+            // Hand the window's credit back only once the frame is
+            // queued for the writer, so the compositor's notion of
+            // "in flight" tracks the encoder rather than the wire.
+            if let Some(window_id) = window_id {
+                window_router.frame_shipped(&window_id);
+            }
+        }
+    };
+
     tokio::select! {
         _ = recv_loop => {}
         _ = events_loop => {}
+        _ = display_loop => {}
     }
 
+    // Symmetric with the `set_consuming(true)` above, and load-bearing:
+    // it both stops the compositor queueing for a channel nobody reads
+    // and drops every outstanding frame credit, so the next session
+    // starts from zero instead of inheriting this one's debt.
+    window_router.set_consuming(false);
     heartbeat_task.abort();
 }
 

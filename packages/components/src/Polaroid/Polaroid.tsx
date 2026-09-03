@@ -13,8 +13,8 @@ interface PolaroidProps {
 	/** Pass `true` to make the card a HTML5 drag source. The
 	 *  caller wires `onDragStart` to attach payload + effect. */
 	draggable?: boolean;
-	onDragStart?: (e: React.DragEvent<HTMLButtonElement>) => void;
-	onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+	onDragStart?: (e: React.DragEvent<HTMLDivElement>) => void;
+	onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 /** A paper-textured "polaroid" card — image + handwritten caption
@@ -30,20 +30,36 @@ export function Polaroid({
 	onClick,
 }: PolaroidProps) {
 	return (
-		// A real <button>, not a div with an onClick: the card is a
-		// picker item, so it has to be reachable by Tab and activatable
-		// by Enter/Space. Doing that by hand (role + tabIndex + a key
-		// handler) reimplements what the element already does, and gets
-		// the Space-scrolls-the-page case wrong. `.polaroid` resets the
-		// UA button chrome.
-		<button
-			type="button"
+		// A <div role="button">, NOT a real <button>, and that is
+		// load-bearing rather than lazy: this card is the drag source for
+		// the only way to attach a sidecar window to the canvas (see
+		// Dock.tsx's onDragStart), and Gecko does not implement native
+		// drag-and-drop on form controls — `dragstart` never fires on a
+		// `<button draggable="true">` in Firefox. Making it a button
+		// silently removes the drag path there, and nothing catches it:
+		// the story dispatches a synthetic DragEvent (which fires on any
+		// element) and the e2e suite is Chromium-only.
+		//
+		// The keyboard affordance a real button would have given us is
+		// reimplemented below — tabIndex plus an Enter/Space handler —
+		// which is exactly what biome's useKeyWithClickEvents asks for.
+		// `preventDefault` on Space is what stops the page scrolling.
+		//
+		// biome-ignore lint/a11y/useSemanticElements: a real <button> is what the rule asks for and is exactly what Gecko refuses to start a drag from
+		<div
+			role="button"
+			tabIndex={0}
 			className={s.polaroid}
 			data-testid="polaroid"
 			title={title ?? caption}
 			draggable={draggable}
 			onDragStart={onDragStart}
 			onClick={onClick}
+			onKeyDown={(e) => {
+				if (e.key !== "Enter" && e.key !== " ") return;
+				e.preventDefault();
+				onClick?.(e as unknown as React.MouseEvent<HTMLDivElement>);
+			}}
 		>
 			{src ? (
 				// `alt=""`: the card's own accessible name is the caption (via
@@ -56,7 +72,7 @@ export function Polaroid({
 				<div className={s.placeholder} data-testid="polaroid-placeholder" />
 			)}
 			<div className={s.caption}>{caption}</div>
-		</button>
+		</div>
 	);
 }
 

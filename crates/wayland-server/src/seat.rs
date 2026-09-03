@@ -76,6 +76,20 @@ pub(crate) struct SeatState {
     /// `server::compositor_thread` calls [`activate_keyboard`] once,
     /// and that call is load-bearing.
     kb_active: bool,
+    /// The seat's single focused surface, mirrored here as well as in
+    /// each `KeyboardData`.
+    ///
+    /// The per-object copy alone is not enough: it only exists on the
+    /// `wl_keyboard`s that were live at the moment focus moved, so a
+    /// keyboard created *after* its client's window was focused starts
+    /// with `focus: None` and — since `keyboard_key` skips a keyboard
+    /// with no focus — silently receives no keys at all until focus
+    /// leaves and comes back. Clients that create the keyboard lazily
+    /// rather than on `wl_seat.capabilities` (SDL, Electron/Ozone), and
+    /// any client that does `release` + `get_keyboard` mid-session, hit
+    /// exactly that. `GetKeyboard` consults this field and sends the
+    /// missing `enter` itself.
+    focus: Option<WlSurface>,
     /// X11 keycodes currently down, so a client that takes focus
     /// mid-chord learns about it from `wl_keyboard.enter`.
     pressed_keys: HashSet<u32>,
@@ -203,6 +217,7 @@ impl SeatState {
             pointers: Vec::new(),
             keyboards: Vec::new(),
             kb_active: false,
+            focus: None,
             pressed_keys: HashSet::new(),
             keymap_file,
             xkb_state,
@@ -404,37 +419,49 @@ impl SeatState {
             };
 
             if keyboard_client != client {
-                if let Some(focus) = &data.focus {
-                    keyboard.leave(serial, focus);
-                    data.focus = None;
+                if let Some(focus) = data.focus.take() {
+                    // Only if it is still alive: `wl_keyboard.leave`
+                    // carries the surface as an argument, and naming a
+                    // destroyed object is a protocol error on the
+                    // client side. Reachable because focus is moved
+                    // *from* a window as it is being torn down.
+                    if focus.is_alive() {
+                        keyboard.leave(serial, &focus);
+                    }
                 }
                 return;
             }
 
             // Same client from here on, so the surface is one this
             // keyboard is allowed to be told about.
-            if let Some(focus) = &data.focus {
-                if focus == surface {
+            if let Some(focus) = data.focus.take() {
+                if &focus == surface {
+                    data.focus = Some(focus);
                     return;
                 }
-                keyboard.leave(serial, focus);
-                data.focus = None;
+                if focus.is_alive() {
+                    keyboard.leave(serial, &focus);
+                }
             }
 
             keyboard.enter(serial, surface, self.serialize_pressed_keys());
             data.focus = Some(surface.clone());
             self.send_modifiers(keyboard, serial);
         });
+        self.focus = Some(surface.clone());
     }
 
     pub(crate) fn keyboard_unfocus(&mut self) {
         let serial = new_serial();
         self.for_all_keyboards(|keyboard, data| {
-            if let Some(focus) = &data.focus {
-                keyboard.leave(serial, focus);
-                data.focus = None;
+            if let Some(focus) = data.focus.take() {
+                // See `keyboard_focus`: the surface may already be dead.
+                if focus.is_alive() {
+                    keyboard.leave(serial, &focus);
+                }
             }
         });
+        self.focus = None;
     }
 
     /// Send one key event to whoever holds keyboard focus.
@@ -658,6 +685,30 @@ impl Dispatch<WlSeat, ()> for State {
                     // and the repeat is the *client's* job: we send one
                     // press and one release, nothing in between.
                     keyboard.repeat_info(25, 600);
+                }
+
+                // Catch this keyboard up to the seat's current focus.
+                // `keyboard_focus` only ever iterates the keyboards that
+                // existed when focus moved, so without this a client
+                // whose window is already focused — the normal case for
+                // anything that binds wl_seat, maps a window, and only
+                // then asks for a keyboard — would sit with
+                // `focus: None` forever and `keyboard_key` would skip
+                // it. No symptom except "this app ignores the keyboard".
+                let focus = state
+                    .seat
+                    .focus
+                    .clone()
+                    .filter(|s| s.is_alive() && s.client() == keyboard.client());
+                if let Some(surface) = focus {
+                    let serial = new_serial();
+                    keyboard.enter(serial, &surface, state.seat.serialize_pressed_keys());
+                    if let Some(cell) = keyboard.data::<KeyboardRef>() {
+                        if let Ok(mut guard) = cell.lock() {
+                            guard.focus = Some(surface);
+                        }
+                    }
+                    state.seat.send_modifiers(&keyboard, serial);
                 }
             }
             // Not a capability we advertise, so this is the one request

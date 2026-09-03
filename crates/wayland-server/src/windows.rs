@@ -164,12 +164,48 @@ fn send(tx: &UnboundedSender<TaggedDisplayUpdate>, client_id: &str, update: Disp
 ///   2. drain every surface's frame callbacks;
 ///   3. (the caller) flush the display.
 ///
-/// Emitting before releasing the frame callbacks is what makes the
-/// tick a throttle: a client cannot start the next frame until we
-/// have finished shipping the last one, so a busy client renders at
-/// the tick rate rather than at whatever rate it can memcpy, and the
-/// unbounded update channel cannot be flooded.
+/// ## Why the frame callbacks come last, and are conditional
+///
+/// A `wl_surface.frame` callback is a client's permission to draw the
+/// next frame. Releasing it only after this tick has finished with the
+/// window is what turns the tick into a throttle at all.
+///
+/// But the tick alone bounds the frame *rate*, not the queue depth:
+/// `UnboundedSender::send` returns immediately, so 60 fps of production
+/// against a consumer that WebP-encodes at 10 fps still grows the
+/// channel without bound (~4 MB per frame at 1280x800). The real bound
+/// is the per-window credit in [`WindowRouter`]: a window that already
+/// has [`MAX_FRAMES_IN_FLIGHT`] un-shipped frames is skipped here
+/// *and* does not get its frame callbacks released, so its client
+/// blocks in its own draw loop instead of us buffering for it. Damage
+/// is left accumulated, so nothing is lost — the skipped rectangle is
+/// unioned into the next frame that does go out.
+///
+/// [`MAX_FRAMES_IN_FLIGHT`]: crate::router::MAX_FRAMES_IN_FLIGHT
 pub(crate) fn tick(state: &mut State) {
+    // Read once per tick: the flag is written from the embedder's
+    // thread, and a value that changed halfway through the loop would
+    // mean some windows saw a transition that others didn't.
+    let consuming = state.router.is_consuming();
+    if consuming != state.streaming {
+        state.streaming = consuming;
+        // Credits are meaningless across the edge in both directions:
+        // going quiet abandons whatever was outstanding, and coming
+        // back must not start a session already in debt.
+        state.router.clear_pending();
+        if consuming {
+            // Whatever the frontend has for these windows is either
+            // nothing (a fresh session) or a frame from before the link
+            // dropped. Either way the next update has to be complete.
+            for entry in state.windows.entries.values_mut() {
+                entry.damage.mark_full();
+            }
+            debug!("update stream attached; forcing full damage on every window");
+        } else {
+            debug!("update stream detached; frames will be composited but dropped");
+        }
+    }
+
     // Destructured rather than accessed through `&mut state`, so the
     // borrow checker can see that the window map, the surface map and
     // the update channel are disjoint. Going through methods on
@@ -198,6 +234,11 @@ pub(crate) fn tick(state: &mut State) {
                 .map(|p| p.wl_surface().clone()),
         )
         .collect();
+
+    // Windows skipped this tick because they are out of frame credit.
+    // Their frame callbacks are withheld below, which is the half that
+    // actually applies backpressure to the client.
+    let mut stalled: Vec<ObjectId> = Vec::new();
 
     for root in &roots {
         let id = root.id();
@@ -282,7 +323,9 @@ pub(crate) fn tick(state: &mut State) {
             let Some(entry) = windows.entries.get_mut(&id) else {
                 continue;
             };
-            composite_and_emit(entry, surfaces, root, geo, update_tx);
+            // No credit check: a window emitting its first frame has
+            // nothing outstanding by construction.
+            composite_and_emit(entry, surfaces, root, geo, update_tx, router, consuming);
             continue;
         }
 
@@ -318,26 +361,51 @@ pub(crate) fn tick(state: &mut State) {
             );
         }
 
-        composite_and_emit(entry, surfaces, root, geo, update_tx);
+        // Lifecycle (map / configure / title) above is unconditional —
+        // it is small, and a window whose size the frontend has not
+        // heard about is a worse failure than a late frame. Only the
+        // pixels are throttled.
+        if consuming && !router.may_emit(&entry.uuid) {
+            stalled.push(id.clone());
+            continue;
+        }
+        composite_and_emit(entry, surfaces, root, geo, update_tx, router, consuming);
     }
 
-    // Frame callbacks last, and for every window whether or not it
-    // was dirty — a client that committed with no damage is still
-    // waiting on its callback, and a window we skipped compositing
-    // must not be starved into a permanent stall.
+    // Frame callbacks last, and — except for the stalled windows — for
+    // every window whether or not it was dirty: a client that committed
+    // with no damage is still waiting on its callback, and a window we
+    // skipped compositing must not be starved into a permanent stall.
+    //
+    // Withholding the callback from a stalled window is the whole
+    // mechanism: a well-behaved client waits for it before drawing
+    // again, so it idles at exactly the rate the embedder can ship,
+    // instead of us buffering frames it will never see.
     for root in &roots {
+        if stalled.contains(&root.id()) {
+            continue;
+        }
         send_tree_frame_callbacks(root);
     }
 }
 
 /// Composite one window's surface tree into its framebuffer and emit
 /// the accumulated damage as a single `PutImage`.
+///
+/// `consuming == false` means nothing is draining the update channel
+/// (no backend session). The composite still runs — the framebuffer has
+/// to stay current, and clients must keep animating — but the payload
+/// is dropped rather than queued for a reader that does not exist. See
+/// [`WindowRouter::set_consuming`].
+#[allow(clippy::too_many_arguments)]
 fn composite_and_emit(
     entry: &mut WindowEntry,
     surfaces: &mut HashMap<ObjectId, surface::SurfaceBuffer>,
     root: &WlSurface,
     geo: Rect,
     update_tx: &UnboundedSender<TaggedDisplayUpdate>,
+    router: &crate::router::WindowRouter,
+    consuming: bool,
 ) {
     if !entry.dirty && !entry.damage.is_dirty() {
         return;
@@ -398,21 +466,32 @@ fn composite_and_emit(
     let Some(rect) = entry.damage.take(w, h) else {
         return;
     };
-    let data = pixels::crop_rgba(&entry.fb, w, h, rect);
+    let mut data = pixels::crop_rgba(&entry.fb, w, h, rect);
     if data.len() != rect.w as usize * rect.h as usize * BPP {
         trace!(uuid = %entry.uuid, "skipping short PutImage crop");
         return;
     }
+    // Last step before the wire, and not negotiable: the frontend
+    // source-over-composites a PutImage onto a persistent back buffer.
+    // See `pixels::force_opaque` for the full argument.
+    pixels::force_opaque(&mut data);
     // The one observable trace of the pixel path. With no backend
-    // attached the updates just queue in the channel, so this line is
-    // the only way a container smoke test (e2e/scripts/wayland-smoke.sh)
+    // attached the update is dropped just below, so this line is the
+    // only way a container smoke test (e2e/scripts/wayland-smoke.sh)
     // can prove pixels were produced rather than merely that a window
     // mapped. `trace!` because it fires up to 60x/s per window.
     trace!(
         uuid = %entry.uuid,
         x = rect.x, y = rect.y, w = rect.w, h = rect.h,
+        shipped = consuming,
         "emitting PutImage",
     );
+    if !consuming {
+        return;
+    }
+    // Spend the credit before the send, so the tick that follows sees
+    // the frame as outstanding even if the embedder ships it instantly.
+    router.frame_emitted(&entry.uuid);
     send(
         update_tx,
         &entry.client_id,
@@ -691,7 +770,16 @@ pub(crate) fn destroy(state: &mut State, id: &ObjectId) {
         );
     }
     if state.windows.focused.as_ref() == Some(id) {
-        state.windows.focused = None;
+        // `windows.focused` is deliberately NOT cleared here. Clearing
+        // it first and then calling `set_focus(state, None)` — which is
+        // what happens when the window that just closed was the last
+        // mapped toplevel — makes `apply_focus`'s change-detection
+        // guard see `None == None` and return immediately: no
+        // `keyboard_unfocus()`, no `WindowFocused { None }`, and a seat
+        // left holding a destroyed surface as its keyboard focus.
+        // Letting `set_focus` perform the whole transition is what
+        // makes the last window closing observable to the frontend.
+        //
         // Hand focus to any other mapped toplevel so the frontend's
         // menu bar and the client's own chrome don't sit in a
         // permanently unfocused limbo after a window closes.

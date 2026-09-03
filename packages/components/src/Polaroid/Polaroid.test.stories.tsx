@@ -42,8 +42,14 @@ export const RendersPlaceholderWithoutSrc: Story = {
 };
 
 /** `draggable` flag flips the HTML5 drag attribute and the
- *  `onDragStart` callback fires with the card `<button>` as
- *  the event target. */
+ *  `onDragStart` callback fires with the card as the event target.
+ *
+ *  NOTE: this synthetic `DragEvent` fires on any element, so it cannot
+ *  catch the engine-level restriction that motivates the card being a
+ *  `<div role="button">` rather than a `<button>` — Gecko does not fire
+ *  `dragstart` on form controls. The element-type assertion below is
+ *  what guards that; the drag path itself has to be checked by hand in
+ *  Firefox. */
 export const DragStartFires: Story = {
 	args: {
 		src: "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
@@ -54,6 +60,11 @@ export const DragStartFires: Story = {
 	play: async ({ canvasElement, args }) => {
 		const polaroid = within(canvasElement).getByTestId("polaroid");
 		expect(polaroid.getAttribute("draggable")).toBe("true");
+		// Firefox refuses to start a native drag from a form control, so
+		// the drag source must not be one.
+		expect(polaroid.tagName).toBe("DIV");
+		expect(polaroid.getAttribute("role")).toBe("button");
+		expect(polaroid.getAttribute("tabindex")).toBe("0");
 		polaroid.dispatchEvent(
 			new DragEvent("dragstart", { bubbles: true, cancelable: true }),
 		);

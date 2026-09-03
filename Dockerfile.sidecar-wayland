@@ -128,6 +128,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/x11-web-sidecar-wayland /usr/local/bin/
+# The binary statically links x11-web-wayland-server, a GPLv3 derivative
+# of waylandcraft, so the image conveys a combined work — and GPLv3 §4/§5
+# require the License to travel with it. NOTICE records what is derived
+# from what.
+COPY crates/wayland-server/COPYING /usr/share/licenses/x11-web-sidecar-wayland/COPYING
+COPY crates/wayland-server/NOTICE /usr/share/licenses/x11-web-sidecar-wayland/NOTICE
 COPY --from=clients /usr/local/bin/wl-input-probe /usr/local/bin/wl-input-probe
 COPY --from=clients /usr/local/bin/weston-simple-shm /usr/local/bin/weston-simple-shm
 COPY crates/sidecar-wayland/entrypoint.sh /usr/local/bin/entrypoint.sh
