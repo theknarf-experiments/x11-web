@@ -403,8 +403,6 @@ export async function spawnApp(
 			els.map((el) => el.getAttribute("data-client-id") ?? ""),
 		),
 	);
-	const countBefore = idsBefore.size;
-
 	await page.locator('[data-testid="spawn-button"]').click();
 	if (command !== "xeyes") {
 		await page.locator('input[placeholder="command"]').fill(command);
@@ -417,19 +415,36 @@ export async function spawnApp(
 	});
 	await page.locator("button", { hasText: "Spawn" }).click();
 
-	await expect(windowFrames).toHaveCount(countBefore + 1, {
-		timeout: windowTimeout,
-	});
-	const newId = await page.evaluate((existing: string[]) => {
-		const set = new Set(existing);
-		const all = Array.from(
-			document.querySelectorAll('[data-testid="window-frame"]'),
-		);
-		const found = all.find(
-			(el) => !set.has(el.getAttribute("data-client-id") ?? ""),
-		);
-		return found?.getAttribute("data-client-id") ?? null;
-	}, Array.from(idsBefore));
+	// Wait for an id that was NOT in the snapshot, rather than for the frame
+	// count to reach `idsBefore.size + 1`.
+	//
+	// The count was the wrong condition and it failed one test in each of
+	// three consecutive full runs — a different test each time (`:135`, `:79`,
+	// `:186`) but always the same call log: "N x locator resolved to 2
+	// elements ... M x resolved to 1 element", expected 3, received 1. The
+	// window list is backend-authoritative and arrives asynchronously after
+	// `page.goto`, so the snapshot can be taken while rows from the previous
+	// test are still draining out of it. Once two of them leave, no later
+	// state can ever equal `2 + 1`, and the spawn that actually succeeded
+	// times out at a count it can never reach.
+	//
+	// Waiting on the id is also strictly STRONGER than the count, not a
+	// relaxation: `count === before + 1` is satisfiable by one removal plus
+	// two additions, whereas "an id we have not seen before is present" is
+	// exactly the thing the caller asked for, and it is what the code below
+	// already used to pick the frame to return.
+	const newIdHandle = await page.waitForFunction(
+		(existing: string[]) => {
+			const set = new Set(existing);
+			const found = Array.from(
+				document.querySelectorAll('[data-testid="window-frame"]'),
+			).find((el) => !set.has(el.getAttribute("data-client-id") ?? ""));
+			return found?.getAttribute("data-client-id") ?? null;
+		},
+		Array.from(idsBefore),
+		{ timeout: windowTimeout },
+	);
+	const newId = await newIdHandle.jsonValue();
 	if (!newId) {
 		throw new Error("spawnApp: failed to identify newly spawned window frame");
 	}
