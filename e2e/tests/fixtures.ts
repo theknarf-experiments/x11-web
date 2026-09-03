@@ -257,13 +257,6 @@ async function doSetup() {
 			// X11WEB_DISABLE_EXTENSIONS=XInputExtension pnpm
 			// exec playwright test …
 			X11WEB_DISABLE_EXTENSIONS: process.env.X11WEB_DISABLE_EXTENSIONS ?? "",
-			// GLX is off by default in the server because advertising
-			// it makes the first GTK3 client on a display — Firefox
-			// included — unable to dispatch input at all. See the
-			// comment in `crates/x11-server/src/xserver/mod.rs`.
-			// `tests/extensions/glx.spec.ts` is the one suite that
-			// needs it, and it is opt-in for exactly this reason.
-			X11WEB_ENABLE_GLX: process.env.X11WEB_ENABLE_GLX ?? "",
 		})
 		// Use a shell-based readiness probe (X socket + backend WS
 		// still alive) instead of `Wait.forLogMessage`. Log-based

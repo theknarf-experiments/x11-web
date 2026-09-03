@@ -1,25 +1,32 @@
 /**
- * REPRODUCER + instruments for the GLX input bug.
+ * REGRESSION TEST + instruments for the GLX input bug (FIXED).
  *
- *     X11WEB_FIREFOX_DIAG=1 [X11WEB_ENABLE_GLX=1] [DIAG_XTRACE=1] \
+ *     X11WEB_FIREFOX_DIAG=1 [DIAG_XTRACE=1] \
  *       pnpm --filter x11-web-e2e exec playwright test --workers=1 \
  *       tests/firefox-input-diag.spec.ts
  *
- * THE BUG: when the server advertises GLX, the GTK3 client that performs
- * GDK's GLX-based visual probe becomes unable to dispatch input — no hover,
- * no click, no keys, forever. GDK caches that probe's result in a
+ * THE BUG THAT WAS: when the server advertised GLX, the GTK3 client that
+ * performed GDK's GLX-based visual probe became unable to dispatch input —
+ * no hover, no click, no keys, forever. GDK caches that probe's result in a
  * `GDK_VISUALS` property on the root window, so every LATER GTK3 client on
- * the same display skips the probe and works fine. That is why it looks like
- * "only the first client is deaf", and why any prior GTK3 client "warms" the
- * display. Firefox is just the app people notice.
+ * the same display skipped the probe and worked fine. That is why it looked
+ * like "only the first client is deaf", and why any prior GTK3 client
+ * "warmed" the display. Firefox was just the app people noticed.
  *
- * GLX is therefore off by default (crates/x11-server/src/xserver/mod.rs);
- * X11WEB_ENABLE_GLX=1 turns it on and reproduces this.
+ * THE CAUSE was one field: we answered QueryExtension("GLX") with
+ * first_event = 0. libGL registers via libXext's XextAddDisplay with
+ * __GLX_NUMBER_EVENTS = 17, which installs __glXWireToEvent into
+ * dpy->event_vec[first_event + 0..16] — i.e. straight over Xlib's own
+ * handlers for KeyPress(2) .. CreateNotify(16). __glXWireToEvent returns
+ * False for those, and Xlib discards any event whose hook returns False.
+ * GLX now reports a real base of 66; see
+ * crates/x11-server/src/xserver/extensions.rs.
  *
- * A SHORTER REPRODUCER, ~2 min, no Firefox:
- *     X11_INPUT_DEBUG=1 X11WEB_ENABLE_GLX=1 pnpm --filter x11-web-e2e exec \
+ * A SHORTER REGRESSION CHECK, ~2 min, no Firefox:
+ *     X11_INPUT_DEBUG=1 pnpm --filter x11-web-e2e exec \
  *       playwright test --workers=1 --repeat-each=2 -g "gtk3-demo reacts to hover"
- *     run 1: HOVER changed=false   run 2: HOVER changed=true
+ *     Both runs must report HOVER changed=true. Before the fix, run 1 was
+ *     changed=false and run 2 changed=true.
  *
  * THE KEY ASSET: the same Firefox, in the same container, on the same
  * Mesa/llvmpipe stack, WORKS against Xvfb on :78 — its probe page goes blue

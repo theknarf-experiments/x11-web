@@ -12,12 +12,6 @@ import {
 	waitForDock,
 } from "./fixtures";
 
-// GLX is opt-in: advertising it leaves the first GTK3 client on a display
-// unable to dispatch input (see crates/x11-server/src/xserver/mod.rs). The
-// GLX-specific coverage lives in tests/extensions/glx.spec.ts, which runs
-// with X11WEB_ENABLE_GLX=1.
-const GLX_ENABLED = !!process.env.X11WEB_ENABLE_GLX;
-
 // No per-file cleanup hook: `fixtures.ts` resets the worker's X server
 // before every test via the auto `x11Clean` fixture, so every spec file
 // gets it rather than just this one.
@@ -841,10 +835,12 @@ test("firefox responds to mouse and keyboard input", async ({
 }) => {
 	// This was annotated `test.fail` for a long time: GTK3 apps received a
 	// wire-correct event stream but never dispatched pointer/key events to
-	// widgets. The cause was ours — advertising GLX made GDK's first-client
-	// visual probe leave the app unable to dispatch input at all. GLX is now
-	// off by default (see crates/x11-server/src/xserver/mod.rs) and this
-	// passes, so the annotation is gone per its own instructions.
+	// widgets. The cause was ours, and it was one field — we answered
+	// QueryExtension("GLX") with first_event = 0, so libGL's XextAddDisplay
+	// installed its wire_to_event hook over Xlib's dispatch slots 0..16 and
+	// Xlib silently dropped every core input event for any client that had
+	// touched libGL (i.e. the one that ran GDK's visual probe). GLX now
+	// reports a real base of 66; see crates/x11-server/src/xserver/extensions.rs.
 	test.setTimeout(240_000);
 	await page.goto(frontendUrl);
 	await waitForDock(page);
@@ -2147,7 +2143,7 @@ test("xdpyinfo reports all registered extensions", async ({
 	const countMatch = result.output.match(/number of extensions:\s+(\d+)/);
 	expect(countMatch).not.toBeNull();
 	const extensionCount = Number(countMatch![1]);
-	expect(extensionCount).toBeGreaterThanOrEqual(24);
+	expect(extensionCount).toBeGreaterThanOrEqual(25);
 
 	// Verify every extension we register is reported.
 	const expectedExtensions = [
@@ -2174,13 +2170,14 @@ test("xdpyinfo reports all registered extensions", async ({
 		"XVideo",
 		"DOUBLE-BUFFER",
 		"XINERAMA",
+		"GLX",
 	];
 	for (const ext of expectedExtensions) {
 		expect(result.output).toContain(ext);
 	}
 });
 
-test("xdpyinfo extension count is exactly 24", async ({ sidecarContainer }) => {
+test("xdpyinfo extension count is exactly 25", async ({ sidecarContainer }) => {
 	// Stricter variant: verify the exact count so we notice
 	// if an extension is accidentally added or removed.
 	const result = await sidecarContainer.exec([
@@ -2192,12 +2189,9 @@ test("xdpyinfo extension count is exactly 24", async ({ sidecarContainer }) => {
 
 	const countMatch = result.output.match(/number of extensions:\s+(\d+)/);
 	expect(countMatch).not.toBeNull();
-	// 25 with GLX, 24 without. GLX is off by default because advertising it
-	// leaves the first GTK3 client on a display unable to dispatch input at
-	// all (see crates/x11-server/src/xserver/mod.rs); X11WEB_ENABLE_GLX=1
-	// turns it back on. Bump these if we ship more; if the count goes down
-	// we want to know an extension regressed.
-	expect(Number(countMatch![1])).toBe(GLX_ENABLED ? 25 : 24);
+	// Bump this if we ship more; if the count goes down we want to know an
+	// extension regressed.
+	expect(Number(countMatch![1])).toBe(25);
 });
 
 test("xprop -root reports EWMH atoms", async ({ sidecarContainer }) => {
@@ -2694,7 +2688,6 @@ test("xev exits cleanly after receiving events", async ({
 });
 
 test("GLX extension is queryable", async ({ sidecarContainer }) => {
-	test.skip(!GLX_ENABLED, "GLX is opt-in — see tests/extensions/glx.spec.ts");
 	// Verify GLX is advertised and responds to version queries
 	const result = await sidecarContainer.exec([
 		"bash",
@@ -4438,11 +4431,11 @@ test("all 24 extensions are advertised by xdpyinfo", async ({
 		].join("\n"),
 	]);
 	expect(result.output).toContain("ext-count-test-done");
-	// Should have at least 24 extensions
+	// Should have at least 25 extensions
 	const match = result.output.match(/ext-count:\s*(\d+)/);
 	if (match) {
 		const count = Number.parseInt(match[1], 10);
-		expect(count).toBeGreaterThanOrEqual(24);
+		expect(count).toBeGreaterThanOrEqual(25);
 	}
 });
 
@@ -4544,7 +4537,6 @@ test("Bell request via xset b does not crash server", async ({
 test("GLX extension reports version and visual configs", async ({
 	sidecarContainer,
 }) => {
-	test.skip(!GLX_ENABLED, "GLX is opt-in — see tests/extensions/glx.spec.ts");
 	const result = await sidecarContainer.exec([
 		"bash",
 		"-c",
@@ -4713,7 +4705,7 @@ test("xdpyinfo lists all 24 registered extensions", async ({
 
 	const countMatch = result.output.match(/number of extensions:\s+(\d+)/);
 	expect(countMatch).not.toBeNull();
-	expect(Number(countMatch![1])).toBeGreaterThanOrEqual(24);
+	expect(Number(countMatch![1])).toBeGreaterThanOrEqual(25);
 
 	const expectedExtensions = [
 		"RENDER",
@@ -4739,6 +4731,7 @@ test("xdpyinfo lists all 24 registered extensions", async ({
 		"XVideo",
 		"DOUBLE-BUFFER",
 		"XINERAMA",
+		"GLX",
 	];
 	for (const ext of expectedExtensions) {
 		expect(result.output).toContain(ext);
